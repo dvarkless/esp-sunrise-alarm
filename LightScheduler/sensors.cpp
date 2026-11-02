@@ -51,3 +51,16 @@ float sensors_humidity()    { return hum; }
 float sensors_pressure()    { return pres; }
 uint8_t sensors_hour()      { return rtc.hour(); }
 uint8_t sensors_minute()    { return rtc.minute(); }
+
+// День недели и дату берём из кэша StampKeeper (Datime из unix), без лишних обращений
+// к DS3231 по I2C; тот же источник времени, что и у sensors_hour()/sensors_minute().
+uint8_t sensors_weekday() {
+    // Без синхронизированного RTC день недели не определён — отдаём Пн (1).
+    // Планировщик при этом не работает: sensors_tick() возвращает true только при synced RTC.
+    return rtc.synced() ? rtc.weekDay() : 1;  // Datime::weekDay(): 1=Пн ... 7=Вс
+}
+
+uint32_t sensors_date_key() {
+    if (!rtc.synced()) return 0;  // нет валидного календарного дня
+    return (uint32_t)rtc.year() * 10000UL + (uint32_t)rtc.month() * 100UL + rtc.day();
+}

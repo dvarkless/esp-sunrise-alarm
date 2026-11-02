@@ -7,7 +7,8 @@
 Button btn;
 
 void button_setup() {
-    btn.init(PIN_BUTTON);  // INPUT_PULLUP, LOW
+    btn.init(PIN_BUTTON);      // INPUT_PULLUP, LOW
+    btn.setHoldTimeout(2000);  // удержание (пропуск сегодня) — 2 с; умолч. 600, макс. 4000 мс
 }
 
 void button_tick() {

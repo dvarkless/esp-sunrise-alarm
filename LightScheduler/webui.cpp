@@ -15,14 +15,29 @@ enum : size_t {
     ID_PRESS = 3,
 };
 
+// Имена дней недели для подписей: индекс 0=Пн ... 6=Вс (ISO 8601)
+static const char* const DAY_NAMES[7] = {"Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"};
+
 // Билдер: собирает веб-интерфейс. Поля Config подключены по указателям,
 // поэтому изменения из браузера сразу пишутся в config, а Saver сохраняет их.
 void build(sets::Builder& b) {
     {
         sets::Group g(b, "Расписание");
-        b.Spinner("Час", 0, 23, 1, &config.scheduleHour);
-        b.Spinner("Минута", 0, 59, 1, &config.scheduleMin);
-        b.Switch("Включено", &config.enabled);
+        b.Switch("Расписание включено", &config.enabled);
+
+        // 7 независимых дней: каждый день — вложенная группа. Settings адресует
+        // виджеты по label, поэтому подписи уникальны по всей странице (день в скобках).
+        // Изменения сразу пишутся в config.days[i], Saver сохранит их автоматически.
+        char label[32];
+        for (uint8_t i = 0; i < 7; i++) {
+            sets::Group day(b, DAY_NAMES[i]);
+            snprintf(label, sizeof(label), "Включено (%s)", DAY_NAMES[i]);
+            b.Switch(label, &config.days[i].enabled);
+            snprintf(label, sizeof(label), "Часы (%s)", DAY_NAMES[i]);
+            b.Spinner(label, 0, 23, 1, &config.days[i].hour);
+            snprintf(label, sizeof(label), "Минуты (%s)", DAY_NAMES[i]);
+            b.Spinner(label, 0, 59, 1, &config.days[i].minute);
+        }
     }
 
     {
@@ -31,6 +46,12 @@ void build(sets::Builder& b) {
         if (b.Button("Розжечь сейчас")) {
             light_startFadeIn();
         }
+    }
+
+    {
+        sets::Group g(b, "Кнопка");
+        // Клик по кнопке откладывает розжиг на это время; Saver сохранит значение сам
+        b.Slider("Отложить (мин)", 1, 60, 1, "мин", &config.snoozeMinutes);
     }
 
     {
