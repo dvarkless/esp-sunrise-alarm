@@ -28,7 +28,8 @@ static const uint8_t CURVE_LUT[256] = {
 };
 static_assert(sizeof(CURVE_LUT) == 256, "CURVE_LUT: ожидается 256 байт");
 
-static bool     fading    = false;  // идёт ли розжиг
+static bool     fading    = false;  // идёт ли розжиг (light_active)
+static bool     on        = false;  // свет включён: true от light_startFadeIn до light_stop
 static uint32_t fadeStart = 0;      // millis() начала розжига
 static uint32_t lastStep  = 0;      // millis() последнего шага ШИМ
 
@@ -39,6 +40,7 @@ void light_setup() {
 }
 
 void light_startFadeIn() {
+    on = true;  // свет считается включённым сразу, ещё до первого шага ШИМ
     fading = true;
     fadeStart = millis();
     lastStep = fadeStart;
@@ -46,12 +48,17 @@ void light_startFadeIn() {
 }
 
 void light_stop() {
+    on = false;
     fading = false;
     ledcWrite(PWM_CHANNEL, 0);
 }
 
 bool light_active() {
     return fading;
+}
+
+bool light_isOn() {
+    return on;
 }
 
 void light_update() {
