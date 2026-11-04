@@ -100,8 +100,15 @@ locks; the Lead assigns ordering.
 
 ## 4. Independent verification (the Lead gate)
 
-- **Never trust a single agent's report.** Every phase report was checked against the actual files:
-  read the diff, grep the claimed invariants, re-run the critical math/simulation.
+- **QA is surface-level by default (user preference, 2026-11-04).** The acceptance criteria that
+  matter: the firmware **compiles** (real `arduino-cli` build via `compile-checker`) and **runs
+  correctly on the chip** (user/hardware). QA must be quick — read the code for obvious defects,
+  confirm the build evidence, check docs match. **No Python behavior models, no tick-by-tick
+  simulations, no host mock compiles unless the user explicitly asks for deep verification.** Deeper
+  QA is reserved for security-critical or high-risk changes, and only on request; a long-running
+  QA pass that re-derives the design is a process failure, not thoroughness.
+- **Never trust a single agent's report.** Read the actual files for the claimed change and confirm
+  the critical invariants (diff, key greps) instead of relying on a summary.
 - **Delegate QA, don't self-review.** The final sign-off QA (`task-13`) was given to a fresh
   `qa-reviewer` with "do not trust prior reports" as an explicit instruction. The Lead still verifies
   git state and reads the QA evidence, but does not own "does it work" alone. (Earlier Lead-run QA was

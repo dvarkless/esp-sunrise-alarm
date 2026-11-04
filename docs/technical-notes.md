@@ -343,14 +343,60 @@ ledcWriteChannel(PWM_CHANNEL, duty);
   экспериментов с флагами; отчёт — pass/fail + ошибки компилятора. Все git-команды и diff'ы — у
   агента `git-release`; документацию обновляет Lead.
 
+### 1.15 AHT10/AHT20 humidity: non-blocking state machine
+
+Requirement (2026-11-04): humidity comes from an AHT10/AHT20 sensor on the shared I2C bus instead of
+BME280, while `loop()` stays non-blocking. The Adafruit library's `getEvent()` cannot be used in the
+loop: it busy-waits `while (getStatus() & 0x80) delay(10);` for the ≈80 ms measurement. So the
+library is used for init/calibration only (`aht.begin(&Wire, 0, 0x38)`, blocking delays are
+setup-only), and the measurement is a raw-Wire state machine driven from `sensors_tick()`:
+
+```cpp
+// trigger 0xAC 0x33 0x00 -> status byte (0x80 = busy) -> 6 data bytes
+raw20 = ((uint32_t)data[1] << 12) | ((uint32_t)data[2] << 4) | (data[3] >> 4);
+humidity = (float)raw20 * 100.0f / 1048576.0f;   // 2^20
+```
+
+- Timing constants (in `sensors.cpp`): `AHT_PERIOD_MS = 2000` (new measurement), `AHT_POLL_MS = 100`
+  (status poll cadence), `AHT_TIMEOUT_MS = 500` (abort a stuck measurement), `AHT_STALE_MS = 10000`
+  (fall back to BME280 after this).
+- No `delay()`, no `while` in the loop path; most passes issue **zero** I2C transfers. Each call does
+  at most a couple of short, bounded I2C transfers (one trigger or status poll, or the final 6-byte
+  read). `sensors_tick()` still returns `true` exactly once per second from `rtc.tick()`, so the 1 Hz
+  scheduler gate is untouched.
+- `aht_tick()` runs at the top of `sensors_tick()`, so the 1 Hz sample uses the freshest cached value.
+- Fallback: `ahtOk == false` (init failed) or stale AHT data → `bme.readHumidity()`; the web UI never
+  shows a frozen/zero value. A one-time Russian Serial log states which source is active.
+- Constants (`AHT_ADDR`, protocol/timing) live in `sensors.cpp`; `config.h` stays the user's local
+  config (Wi-Fi credentials, BME280 address) and is not part of the feature code.
+
+### 1.16 BME280 IIR filter: explicit `setFilter()` before `begin()`
+
+GyverBME280 implements the BME280 IIR filter; `setFilter(mode)` only stores `_filter_coef`, which is
+written to register `0xF5` inside `begin()`. The call order is therefore mandatory:
+
+```cpp
+bme.setFilter(BME_FILTER_MODE);   // FILTER_COEF_16 == 0x04
+ok = bme.begin(BME280_ADDR);
+```
+
+- Modes: `FILTER_DISABLE=0x00`, `FILTER_COEF_2=0x01`, `FILTER_COEF_4=0x02`, `FILTER_COEF_8=0x03`,
+  `FILTER_COEF_16=0x04`.
+- The library default is already ×16, so the explicit call is behavior-preserving — it makes the
+  filter visible and tunable in one place (`BME_FILTER_MODE` in `sensors.cpp`) instead of relying on
+  an implicit library default.
+- The filter smooths temperature/pressure at the cost of slower response; register `0xF5` also carries
+  standby time: `(_standby_time << 5) | (_filter_coef << 2)`.
+- If the GyverBME280 version changes, re-check the `FILTER_*` values against `GyverBME280.h`.
+
 ---
 
 ## 2. Verification without hardware or a toolchain
 
 At the time of the feature work the environment had no `arduino-cli`, no PlatformIO, no ESP32 core,
 no Arduino libraries, and no tests. These workarounds gave useful coverage anyway. A real toolchain
-was later installed and the firmware compiled for real (results in §1.14); the fallbacks below remain
-the record of how the features were verified before that.
+was later installed and the firmware compiled for real (results in §1.14–§1.16); the fallbacks below
+remain the record of how the features were verified before that.
 
 ### 2.1 Tri-verification of the LUT (docs ⇄ code ⇄ formula)
 
@@ -368,8 +414,8 @@ assert all(code_lut[i] <= code_lut[i+1] for i in range(255))
 ### 2.2 Mock compilation with stub headers
 
 `g++ -std=c++11 -Wall -Wextra -fsyntax-only` on the real `.cpp`/`.ino` files, with hand-written
-stubs for `Arduino.h`, `WiFi.h`, `LittleFS.h`, `SaverFile.h`, `Wire.h`, `GyverBME280.h`,
-`GyverDS3231.h`, `SettingsGyver.h`.
+stubs for `Arduino.h`, `Wire.h`, `WiFi.h`, `LittleFS.h`, `SaverFile.h`, `GyverBME280.h`,
+`GyverDS3231.h`, `SettingsGyver.h`, `Adafruit_AHTX0.h`.
 
 - Catches missing includes, wrong signatures against the *expected* API, typos, `static_assert`
   failures, format-argument mistakes.
@@ -439,8 +485,9 @@ Fast regression check if another widget is added later.
 
 - History: `ed8c201` (user's baseline import) → `e97cec3` (three features + curve) → `2cf0285`
   (gated tap + technical notes) → `84c65d0` (`.gitignore`: `libs/`) → compile-fix + docs-sync
-  release (2026-11-04: ESP32 core 3.x LEDC API, docs split; see `git log`). All pushes were
-  fast-forward; HEAD == origin/main after each release.
+  release (2026-11-04: ESP32 core 3.x LEDC API, docs split) → AHT humidity + BME280 filtration
+  release (2026-11-04; see `git log`). All pushes were fast-forward; HEAD == origin/main after each
+  release.
 - Release mechanics (explicit-path staging, secret scan, push verification, GPG-signing sandbox
   workaround, unsigned-commit disclosure) and all agent-orchestration patterns now live in
   [`lead-hacks.md`](lead-hacks.md).
@@ -468,6 +515,10 @@ Fast regression check if another widget is added later.
 - ESP32 core 3.x removed the legacy LEDC API (`ledcSetup`/`ledcAttachPin`/`ledcWrite(channel,…)`):
   use `ledcAttachChannel()`/`ledcWriteChannel()` (§1.14). Stub-based checks can hide this because the
   stub is whatever you wrote — only a real compile proves it.
+- AHT10/AHT20: `Adafruit_AHTX0::getEvent()` busy-waits ≈80 ms (`while(busy) delay(10)`), so it must
+  not be called from `loop()` — use the raw-Wire trigger→poll→read machine (§1.15).
+- BME280 IIR: `setFilter()` must come **before** `begin()` — the coefficient is written to register
+  `0xF5` only during `begin()` (§1.16); the library default is already ×16.
 - `sensors_tick()` gating means the scheduler is inactive when the RTC is unsynced — fallbacks are
   never used for triggering, only for safe indexing.
 - In this harness, each `bash` call gets a fresh `/tmp`; do multi-file experiments in one invocation.
@@ -508,19 +559,28 @@ hour == day.hour && minute == day.minute
 | master switch off | scheduled events disabled; tap-snooze still works if the light is on (manual override) |
 | per-day switch off | that weekday skipped; other days unaffected |
 
+**Sensors:** temp/pressure from BME280 (IIR ×16, `setFilter()` before `begin()`); humidity from
+AHT10/AHT20 at `0x38` via a non-blocking trigger→poll→read machine (2 s cadence, 100 ms polling,
+500 ms timeout), BME280 fallback when AHT is missing or data is >10 s old; the 1 Hz RTC gate and the
+scheduler are untouched (§1.15–§1.16).
+
 **Local libraries:** `libs/` (git-ignored) contains Settings 1.4.3, Saver 1.1.0, EncButton 3.7.6,
 GyverBME280 1.5.4, GyverDS3231 1.2.1 plus 9 transitive deps; exact versions/SHAs in the ignored
-`libs/README.md` (§1.13).
+`libs/README.md` (§1.13). AHT uses the installed Arduino libraries Adafruit AHTX0 2.0.6 +
+Adafruit BusIO + Adafruit Unified Sensor 1.1.15 (not part of `libs/`).
 
 **Build (real toolchain, 2026-11-04):** `arduino-cli 1.5.1` + core `esp32:esp32 3.3.0`:
-`arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/` → exit 0, flash 1 093 751 / 1 310 720 B
-(83 %), RAM 48 972 / 327 680 B (14 %). Requires ESP32 core ≥ 3.0; only the `compile-checker` agent
-runs `arduino-cli` (§1.14).
+`arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/` → exit 0. Latest build (after AHT
+humidity + BME280 filtration): flash 1 097 051 / 1 310 720 B (83 %), RAM 49 028 / 327 680 B (14 %),
+no project warnings. Requires ESP32 core ≥ 3.0 and the Adafruit AHTX0/BusIO/Unified Sensor libraries;
+only the `compile-checker` agent runs `arduino-cli` (§1.14).
 
 **Hardware checklist (still pending — build verified, device not):** Saver `'B'` migration from an old `/config.cfg`;
 DS3231 weekday/date mapping; 2 s hold boundary + debounce; tap-vs-hold feel; LED curve low-end and
 perceived smoothness; web UI day-group rendering + snooze persistence after reboot; power-cycle
-clears RAM snooze/skip (expected).
+clears RAM snooze/skip (expected); **new:** AHT10/AHT20 present at `0x38` and humidity in the UI,
+AHT/BME cross-talk on the shared bus, BME280 IIR ×16 smoothing vs response time, AHT cadence
+responsiveness (2 s), fallback when the AHT is unplugged at runtime.
 
 **Useful commands**
 
