@@ -42,10 +42,12 @@ HEAD == origin/main.
 ## 2. Delegation prompt pattern
 
 Roles used: `impl-core` (firmware implementation), `release-bot` (git only), `qa-reviewer` (read-only
-independent QA), `libs-bot` (tooling), `compile-checker` (**sole owner of `arduino-cli`**: compiles the
-firmware, fixes compile errors, returns the code diff), plus short-lived subagents for focused research.
-Spawn **fresh** contexts for independent reviewers/release work; resume a durable inactive teammate with
-`send_message` when continuity helps.
+independent QA), `libs-bot` (tooling), `compile-checker` (**sole owner of `arduino-cli`**: builds and
+fixes compile errors **only when necessary**, reports pass/fail + errors — runs no git and produces no
+diffs), `git-release` (**sole owner of all git commands and code diffs**: `status/diff/log/add/commit/
+push`, release verification), plus short-lived subagents for focused research. Spawn **fresh** contexts
+for independent reviewers/release work; resume a durable inactive teammate with `send_message` when
+continuity helps.
 
 Every delegation prompt was self-contained and included:
 
@@ -128,8 +130,10 @@ locks; the Lead assigns ordering.
   `arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/`. This immediately caught an ESP32
   core 3.x API removal (`ledcSetup`/`ledcAttachPin`) that the stub compile could never catch — stubs
   are whatever we wrote. **Only the `compile-checker` teammate runs `arduino-cli`; the Lead and every
-  other agent must not.** The compile-checker returns the code diff; the Lead/other agents own git
-  and docs.
+  other agent must not.** Builds happen only when necessary (a code change to verify or an explicit
+  Lead request) and only with the exact command — no flag experiments, no duplicate builds.
+  `compile-checker` reports pass/fail + compiler errors only; **all git commands and code diffs belong
+  to `git-release`**, docs stay with the Lead.
 - **Sandbox cache workaround:** if an agent sandbox mounts `~/.cache` read-only, `arduino-cli` fails on
   `build.options.json`; set `XDG_CACHE_HOME=/tmp/…` or pass `--build-path /tmp/…` (project unaffected).
 - **Upstream source instead of memory:** `curl -fsSL https://raw.githubusercontent.com/GyverLibs/<lib>/main/<path>`
@@ -154,6 +158,9 @@ locks; the Lead assigns ordering.
 
 ## 6. Git / release protocol
 
+- **Single git owner:** all git commands (`status/diff/log/add/commit/push`) and code-diff generation
+  are delegated to the `git-release` agent. The Lead requests a release/diff from it; `compile-checker`
+  never runs git. One writer per git index.
 - **Pre-flight expected set:** `git status --short` compared against the Lead's known change set;
   unexpected files ⇒ STOP. This caught nothing malicious but makes "commit everything" safe.
 - **Explicit-path staging**, never `git add -A` (no build artifacts, no accidental secrets).
@@ -250,16 +257,18 @@ locks; the Lead assigns ordering.
 | task-15 | pending doc-comment nits from QA |
 
 > **New run, 2026-11-04 (new Lead):** board ids restarted — `task-1` = firmware compile-fix
-> (`compile-checker`, first real build), `task-2` = docs sync + release (Lead). The map above is the
-> historical 2026-11-02 run; ids are per-board-session, not global.
+> (`compile-checker`, first real build), `task-2` = docs sync + release (Lead), `task-3` =
+> `git-release` ownership + process-rule docs release. The map above is the historical 2026-11-02 run;
+> ids are per-board-session, not global.
 
-**Every release:** pre-flight `git status --short` → explicit `git add <paths>` → commit (GPG
-workaround if needed) → `git push origin main` → verify `HEAD == origin/main == ls-remote` → report
-hash + unsigned status.
+**Every release:** request it from `git-release` (sole git owner): pre-flight `git status --short` →
+explicit `git add <paths>` → commit (GPG workaround if needed) → `git push origin main` → verify
+`HEAD == origin/main == ls-remote` → report hash + unsigned status.
 
-**Every build check:** request `compile-checker` (sole `arduino-cli` owner) → it fixes compile errors
-and returns the code diff → Lead independently reviews the diff → Lead/other agents handle git + docs.
-Never run `arduino-cli` outside `compile-checker`.
+**Every build check:** request `compile-checker` (sole `arduino-cli` owner) only when necessary (code
+changed or the Lead asks) → it runs one exact-command build, fixes errors, reports pass/fail + errors
+(no diff). Request `git-release` for the code diff and git state. Never run `arduino-cli` outside
+`compile-checker`, and never run git outside `git-release`.
 
 **Every phase:** claim task → read files → minimal diff → agent self-verifies → Lead re-verifies or
 delegates QA → complete task → report → next phase.

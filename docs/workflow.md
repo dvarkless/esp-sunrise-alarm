@@ -37,8 +37,10 @@ all verification was static:
 
 Since 2026-11-04 a real toolchain is available (`arduino-cli 1.5.1`, core `esp32:esp32 3.3.0`, Gyver
 libraries installed). The **`compile-checker`** teammate is the only agent allowed to run
-`arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/`; it fixes compile errors and returns the
-code diff, while the Lead/other agents update git and docs. Static checks below remain useful for
+`arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/`, and only when necessary — after a code
+change to verify or when the Lead explicitly asks; no flag experiments and no duplicate builds. It
+fixes compile errors and reports pass/fail + compiler errors only. All git commands and code diffs
+belong to the **`git-release`** agent; docs stay with the Lead. Static checks below remain useful for
 semantics and behavior, which a compile cannot verify.
 
 - **Upstream API checks** — fetched raw sources from GyverLibs to confirm semantics instead
@@ -60,6 +62,8 @@ semantics and behavior, which a compile cannot verify.
 
 - Edit **only** files in the claimed task's write scope; if a change needs another file
   (`config.h`, `sensors.*`, …), stop and report instead of editing it.
+- Git commands (`status/diff/add/commit/push`) and code diffs are owned by `git-release`; never run
+  git or produce diffs in implementer/compile agents.
 - No `git commit`/`checkout`/`push` — changes stay in the working tree; release is a
   separate task.
 - No toolchain/package installation; the toolchain is pre-installed — do not modify it or the libraries.
