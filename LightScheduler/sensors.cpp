@@ -59,8 +59,8 @@ void sensors_setup() {
         log_println(F("Sensors: DS3231 не найден на шине I2C"));
     } else if (rtc.isReset()) {
         // Время RTC не установлено (сброс питания) — ставим время компиляции прошивки
-        rtc.setBuildTime();
-        log_println(F("Sensors: RTC был сброшен, установлено время компиляции"));
+        //rtc.setBuildTime();
+        log_println(F("Sensors: RTC был сброшен!"));
     }
 
     bme.setFilter(BME_FILTER_MODE);  // IIR x16, см. BME_FILTER_MODE
