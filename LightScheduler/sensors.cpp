@@ -152,6 +152,8 @@ float sensors_humidity()    { return hum; }
 float sensors_pressure()    { return pres; }
 uint8_t sensors_hour()      { return rtc.hour(); }
 uint8_t sensors_minute()    { return rtc.minute(); }
+String sensors_date_str() { return rtc.dateToString(); }
+String sensors_time_str() { return rtc.timeToString(); }
 
 // День недели и дату берём из кэша StampKeeper (Datime из unix), без лишних обращений
 // к DS3231 по I2C; тот же источник времени, что и у sensors_hour()/sensors_minute().

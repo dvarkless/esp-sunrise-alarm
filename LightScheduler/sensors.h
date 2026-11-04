@@ -19,3 +19,5 @@ uint8_t sensors_weekday();
 // Ключ календарного дня ГГГГММДД (например, 20261102) для детекта смены суток и «пропуска
 // сегодня». 0 — RTC не синхронизирован, валидного дня нет.
 uint32_t sensors_date_key();
+String sensors_date_str();
+String sensors_time_str();

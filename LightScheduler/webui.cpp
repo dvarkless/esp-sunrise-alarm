@@ -13,8 +13,10 @@ SettingsGyver sett("Light Scheduler");
 enum : size_t {
     ID_TEMP = 1,
     ID_HUM  = 2,
-    ID_PRESS = 3,
-    ID_LOG = 4,
+    ID_DATE = 3,
+    ID_TIME = 4,
+    ID_PRESS = 5,
+    ID_LOG = 6,
 };
 
 // Имена дней недели для подписей: индекс 0=Пн ... 6=Вс (ISO 8601)
@@ -64,9 +66,11 @@ void build(sets::Builder& b) {
 
     {
         sets::Group g(b, "Датчики");
+        b.Label(ID_DATE, "Дата", sensors_date_str());
+        b.Label(ID_TIME, "Время", sensors_time_str());
         b.LabelFloat(ID_TEMP,  "Температура (°C)", sensors_temperature(), 1);
-        b.LabelFloat(ID_HUM,   "Влажность (%)",    sensors_humidity(),    1);
-        b.LabelFloat(ID_PRESS, "Давление (гПа)",   sensors_pressure(),    1);
+        b.LabelFloat(ID_HUM,   "Влажность (%)", sensors_humidity(), 1);
+        b.LabelFloat(ID_PRESS, "Давление (гПа)", sensors_pressure(), 1);
     }
 
     // Виджет-лог: сюда уходит всё, что пишется через log_*() (и в Serial). Последний элемент страницы.
