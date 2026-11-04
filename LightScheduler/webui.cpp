@@ -46,9 +46,12 @@ void build(sets::Builder& b) {
 
     {
         sets::Group g(b, "Розжиг");
-        b.Slider("Длительность (мс)", 0, 60000, 1000, "ms", &config.fadeDuration);
-        if (b.Button("Розжечь сейчас")) {
+        b.Slider("Длительность (мин)", 0, 60, 1, "мин", &config.fadeDuration);
+        if (b.Button("Запуск будильника")) {
             light_startFadeIn();
+        }
+        if (b.Button("Выключить будильник")) {
+            light_stop();
         }
     }
 
@@ -56,6 +59,7 @@ void build(sets::Builder& b) {
         sets::Group g(b, "Кнопка");
         // Клик по кнопке откладывает розжиг на это время; Saver сохранит значение сам
         b.Slider("Отложить (мин)", 1, 60, 1, "мин", &config.snoozeMinutes);
+        b.Slider("Время свечения (мин)", 0, 60, 1, "мин", &config.turnOffDelay);
     }
 
     {

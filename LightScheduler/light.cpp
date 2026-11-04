@@ -61,24 +61,28 @@ bool light_isOn() {
 }
 
 void light_update() {
-    if (!fading) return;
+    if (millis() - lastStep < FADE_STEP_MS) return;
+    lastStep = millis();
 
-    uint32_t now = millis();
-    if (now - lastStep < FADE_STEP_MS) return;
-    lastStep = now;
-
-    uint32_t elapsed = now - fadeStart;
-    uint32_t dur     = config.fadeDuration;
-
-    // 0 мс или розжиг завершён — сразу максимум и остановка
-    if (!dur || elapsed >= dur) {
-        ledcWriteChannel(PWM_CHANNEL, 255);
-        fading = false;
-        return;
-    }
+    uint32_t elapsed = millis() - fadeStart;
+    uint32_t dur = fading ? config.fadeDuration*60*1000 : config.turnOffDelay*60*1000;
 
     // dur <= 60000 и elapsed < dur => elapsed*255 < 15.3 млн (uint32), idx <= 254;
     // 255 выставляется отдельной веткой выше. Накопления нет — дрейфа нет.
-    uint16_t idx = (uint16_t)(elapsed * 255UL / dur);
-    ledcWriteChannel(PWM_CHANNEL, CURVE_LUT[idx]);  // при PWM_RES = 8 допустим диапазон 0..255
+    if (fading) {
+        if (!dur || elapsed >= dur) {
+            ledcWriteChannel(PWM_CHANNEL, 255);
+            fading = false;
+            fadeStart = millis();
+            return;
+        }
+        uint16_t idx = (uint16_t)(elapsed * 255UL / dur);
+        ledcWriteChannel(PWM_CHANNEL, CURVE_LUT[idx]);  // при PWM_RES = 8 допустим диапазон 0..255
+    }
+    else {
+        if (!dur || elapsed >= dur) {
+            light_stop();
+            return;
+        }
+    }
 }
