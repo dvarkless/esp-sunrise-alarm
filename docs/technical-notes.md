@@ -236,14 +236,16 @@ assert all(lut[i] <= lut[i+1] for i in range(255))
 - **Widgets are keyed by label** → every label must be unique across the whole page. Dynamic labels
   are generated per day: `snprintf(label, 32, "Часы (%s)", DAY_NAMES[i])`, giving 28 unique labels
   (1 master + 7×3 day widgets + fade slider + button + snooze slider + 3 sensors) and 11 unique
-  group titles (4 groups + 7 day groups).
+  container titles (4 groups + 7 day rows).
 - **Reusing one stack `char label[32]` is safe** because Settings serializes the label into the
   response packet synchronously inside the widget call (`(*p)[Code::label] = label;` in
   `Builder::_beginWidget`) — it never stores the pointer. (Checked in `src/core/builder.h`; do not
   do this with a library that defers rendering.)
-- **Nested `sets::Group` per day**, not `Tabs`: in current Settings, `Tabs` is a *value* widget
+- **`sets::Row` per day, not nested `sets::Group`**: in current Settings, `Tabs` is a *value* widget
   (`bool Tabs(Text, AnyPtr)` returns the selected index), not a container; containers are
-  `Group/Menu/Buttons/Row`. Seven nested groups render fine on phone.
+  `Group/Menu/Buttons/Row`. Settings 1.4.3's web client silently drops nested groups (its `Group`
+  renderer has no `case "group"`), but `Row` *inside* a group renders fine — so the 7 days are rows
+  inside the «Расписание» group, each titled with the day name.
 - Widgets only exist during `onBuild`; the sensor values are refreshed via `onUpdate` IDs 1/2/3
   (polling mode, no WebSocket).
 

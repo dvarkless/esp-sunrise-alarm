@@ -25,12 +25,14 @@ void build(sets::Builder& b) {
         sets::Group g(b, "Расписание");
         b.Switch("Расписание включено", &config.enabled);
 
-        // 7 независимых дней: каждый день — вложенная группа. Settings адресует
-        // виджеты по label, поэтому подписи уникальны по всей странице (день в скобках).
+        // 7 независимых дней: каждый день — Row внутри группы, а не вложенная группа
+        // (Settings 1.4.3 молча отбрасывает вложенные группы, а строки внутри группы
+        // рендерятся нормально). Settings адресует виджеты по label, поэтому подписи
+        // уникальны по всей странице (день в скобках).
         // Изменения сразу пишутся в config.days[i], Saver сохранит их автоматически.
         char label[32];
         for (uint8_t i = 0; i < 7; i++) {
-            sets::Group day(b, DAY_NAMES[i]);
+            sets::Row day(b, DAY_NAMES[i]);
             snprintf(label, sizeof(label), "Включено (%s)", DAY_NAMES[i]);
             b.Switch(label, &config.days[i].enabled);
             snprintf(label, sizeof(label), "Часы (%s)", DAY_NAMES[i]);
