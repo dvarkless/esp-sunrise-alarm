@@ -17,7 +17,10 @@ esp-sunrise-alarm/
 ├── README.md               // заголовок и одна строка описания
 ├── PROJECT.md              // этот файл
 ├── docs/
-│   └── light-curve.md      // исследование кривой розжига: формула, LUT, обоснование
+│   ├── light-curve.md      // исследование кривой розжига: формула, LUT, обоснование
+│   ├── technical-notes.md  // инженерные заметки: приёмы прошивки и способы верификации
+│   ├── workflow.md         // процесс реализации: жизненный цикл задач, фазы, отчётность
+│   └── lead-hacks.md       // playbook Team Lead: делегирование, QA, релизы
 └── LightScheduler/         // прошивка (скетч + модули)
     ├── LightScheduler.ino  // setup() + неблокирующий loop(), расписание и состояние кнопки
     ├── config.h            // пины, PWM, I2C, WiFi, struct Config, прототипы
@@ -33,7 +36,9 @@ esp-sunrise-alarm/
     └── README.md           // краткая инструкция по библиотекам и запуску
 ```
 
-Особенности, которых в репозитории **нет**: `platformio.ini`, CMake, CI, тестов, скриптов сборки, файлов LittleFS-образа. Сборка — только через Arduino IDE (или arduino-cli) по скетчу `LightScheduler.ino`.
+Особенности, которых в репозитории **нет**: `platformio.ini`, CMake, CI, тестов, скриптов сборки, файлов LittleFS-образа. Сборка — через Arduino IDE или `arduino-cli` по скетчу `LightScheduler.ino` (проверено на `arduino-cli 1.5.1` и ядре `esp32:esp32 3.3.0`).
+
+Локально, но не в git, может лежать `TASKS.md` — снапшот борды задач для офлайн-справки; он перечислен в `.gitignore` и не коммитится.
 
 ---
 
@@ -138,8 +143,8 @@ extern Config config;  // sizeof(Config) = 28 байт
 
 | Функция | Поведение |
 |---|---|
-| `light_setup()` | `ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RES)` + `ledcAttachPin` + гашение |
-| `light_startFadeIn()` | Запуск розжига: `on = true` (свет включён сразу), `fadeStart = millis()`, `lastStep = fadeStart`, `ledcWrite(0)` |
+| `light_setup()` | `ledcAttachChannel(PIN_PWM_LED, PWM_FREQ, PWM_RES, PWM_CHANNEL)` (LEDC API ESP32 core 3.x) + гашение |
+| `light_startFadeIn()` | Запуск розжига: `on = true` (свет включён сразу), `fadeStart = millis()`, `lastStep = fadeStart`, `ledcWriteChannel(PWM_CHANNEL, 0)` |
 | `light_stop()` | Мгновенное гашение и остановка fade (`on = false`) |
 | `light_update()` | Неблокирующий шаг не чаще `FADE_STEP_MS`: `elapsed = now - fadeStart`, `idx = elapsed*255/fadeDuration`, скважность = `CURVE_LUT[idx]`; целочисленно, без float. По завершении `fading = false`, но `on` остаётся `true` — лента на максимуме |
 | `light_active()` | `true`, пока идёт розжиг (после завершения — `false`) |
@@ -237,6 +242,10 @@ Wi-Fi: при заданном `WIFI_SSID` — режим STA с ожидани�
 3. `Tools → Partition Scheme` — схема с LittleFS, например **Default 4MB with spiffs** (нужно место под `/config.cfg`).
 4. Открыть [`LightScheduler.ino`](LightScheduler/LightScheduler.ino); все `.h/.cpp` уже лежат в той же папке.
 5. Прошить, открыть Serial Monitor на 115200 — в логе будут версия, статусы датчиков, RTC и IP-адрес веб-интерфейса.
+
+**Проверка сборки (реальный тулчейн):** `arduino-cli 1.5.1`, ядро `esp32:esp32 3.3.0`, библиотеки из таблицы выше. Команда `arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/` завершается успешно: flash 1 093 751 из 1 310 720 байт (83 %), RAM 48 972 из 327 680 байт (14 %), предупреждений из кода проекта нет.
+
+> **Требование к ядру ESP32:** прошивка использует LEDC API ядра 3.x — `ledcAttachChannel()` / `ledcWriteChannel()`. В core 3.0 legacy-вызовы `ledcSetup`/`ledcAttachPin`/`ledcWrite(channel, …)` удалены, поэтому нужно ядро **esp32 by Espressif Systems ≥ 3.0** (проверено на 3.3.0).
 
 Настройка под свою схему — константы и значения по умолчанию в [`config.h`](LightScheduler/config.h), Wi-Fi — `WIFI_SSID`/`WIFI_PASS`/`AP_NAME` там же.
 

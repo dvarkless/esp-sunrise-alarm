@@ -206,14 +206,18 @@ for row in range(16):
 
 ## 9. Реализация в task-5 (выполнено: `light.h` / `light.cpp`)
 
+> API-вызовы ниже — для ESP32 core 3.x (`ledcWriteChannel`). Миграция с legacy LEDC
+> (`ledcSetup`/`ledcAttachPin`/`ledcWrite(channel,…)`) описана в
+> [`technical-notes.md`](technical-notes.md) §1.14.
+
 1. Вставить `CURVE_LUT[256]` из раздела 7 в `light.cpp` (файл-уровень, `static const` —
    на ESP32 такое `const` и так лежит во flash, `PROGMEM` не обязателен). Добавить
    `static_assert(sizeof(CURVE_LUT) == 256, "CURVE_LUT: ожидается 256 байт");`.
 2. Публичный API **не менять**: `light_setup / light_startFadeIn / light_stop / light_update /
    light_active`.
 3. Убрать `float acc` и накопление шага. Хранить `fading`, `fadeStart` (мс) и `lastStep` (мс).
-   `light_startFadeIn()`: `fading=true; fadeStart=millis(); lastStep=fadeStart; ledcWrite(0)`.
-   `light_stop()`: `fading=false; ledcWrite(0)`.
+   `light_startFadeIn()`: `fading=true; fadeStart=millis(); lastStep=fadeStart; ledcWriteChannel(PWM_CHANNEL, 0)`.
+   `light_stop()`: `fading=false; ledcWriteChannel(PWM_CHANNEL, 0)`.
 4. `light_update()` — всё целочисленно:
 
 ```cpp
@@ -226,14 +230,14 @@ void light_update() {
     uint32_t dur     = config.fadeDuration;
 
     if (!dur || elapsed >= dur) {          // 0 мс или конец розжига
-        ledcWrite(PWM_CHANNEL, 255);
+        ledcWriteChannel(PWM_CHANNEL, 255);
         fading = false;
         return;
     }
 
     // dur ≤ 60000 и elapsed < dur ⇒ elapsed*255 < 15.3e6 (uint32), idx ≤ 254
     uint16_t idx = (uint16_t)(elapsed * 255UL / dur);
-    ledcWrite(PWM_CHANNEL, CURVE_LUT[idx]);
+    ledcWriteChannel(PWM_CHANNEL, CURVE_LUT[idx]);
 }
 ```
 

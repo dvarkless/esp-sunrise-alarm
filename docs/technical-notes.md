@@ -1,10 +1,15 @@
 # Technical Notes — esp-sunrise-alarm
 
-Distilled engineering notes from the implementation of the three features (per-weekday schedule,
-perceptual fade curve, button snooze/skip) plus the QA and release tooling used around it.
-Reference commit: `e97cec3` (main), plus the post-release single-tap policy change (task-11)
-documented in §1.12. Companion docs: [`PROJECT.md`](../PROJECT.md),
-[`docs/light-curve.md`](light-curve.md).
+Distilled **firmware engineering** notes from the implementation of the three features (per-weekday
+schedule, perceptual fade curve, button snooze/skip) plus the post-release gated-tap policy change
+(§1.12) and the first real-toolchain compile (§1.14). Release history: `e97cec3` (features) →
+`2cf0285` (gated tap + technical notes) → `84c65d0` (`.gitignore`: local `libs/`) → compile-fix +
+docs-sync release (2026-11-04, ESP32 core 3.x LEDC API; see `git log`).
+
+Firmware details live here. The Team Lead's orchestration / release / independent-verification
+playbook is in [`lead-hacks.md`](lead-hacks.md); the implementer's task-board workflow is in
+[`workflow.md`](workflow.md). Companion docs: [`PROJECT.md`](../PROJECT.md),
+[`light-curve.md`](light-curve.md).
 
 ---
 
@@ -193,10 +198,10 @@ static_assert(sizeof(CURVE_LUT) == 256, "CURVE_LUT: ожидается 256 ба�
 uint32_t elapsed = now - fadeStart;
 uint32_t dur     = config.fadeDuration;
 
-if (!dur || elapsed >= dur) { ledcWrite(PWM_CHANNEL, 255); fading = false; return; }
+if (!dur || elapsed >= dur) { ledcWriteChannel(PWM_CHANNEL, 255); fading = false; return; }
 
 uint16_t idx = (uint16_t)(elapsed * 255UL / dur);   // elapsed ≤ 60000 => product < 15.3e6
-ledcWrite(PWM_CHANNEL, CURVE_LUT[idx]);
+ledcWriteChannel(PWM_CHANNEL, CURVE_LUT[idx]);
 ```
 
 Hacks / details worth remembering:
@@ -261,9 +266,9 @@ the light module keeps a separate `on` flag:
 static bool fading = false;   // light_active()
 static bool on     = false;   // light_isOn()
 
-void light_startFadeIn() { on = true;  fading = true; ... ledcWrite(0); }
-void light_stop()        { on = false; fading = false; ledcWrite(0); }
-// end of fade: ledcWrite(255); fading = false;   // on stays true
+void light_startFadeIn() { on = true;  fading = true; ... ledcWriteChannel(PWM_CHANNEL, 0); }
+void light_stop()        { on = false; fading = false; ledcWriteChannel(PWM_CHANNEL, 0); }
+// end of fade: ledcWriteChannel(PWM_CHANNEL, 255); fading = false;   // on stays true
 ```
 
 - `on` is set **before** the first PWM write in `light_startFadeIn()`, so the first tap after a
@@ -277,12 +282,73 @@ void light_stop()        { on = false; fading = false; ledcWrite(0); }
 - Product rule (2026-11-02): tap is a no-op unless the light is fading or fully on; before the
   scheduled event there is nothing to postpone, so the schedule later fires as usual.
 
+### 1.13 Local Gyver library checkout (`libs/`)
+
+The exact upstream libraries this project was verified against are cloned into the git-ignored
+`libs/` directory (shallow `--depth 1`, `main`), so API behavior can be checked offline and a real
+compile can be attempted later with the matching versions:
+
+| Library | Version | | Library | Version |
+|---|---|---|---|---|
+| Settings | 1.4.3 | | GTL | 1.4.7 |
+| Saver | 1.1.0 | | GyverDB | 1.4.4 |
+| EncButton | 3.7.6 | | StringUtils | 1.6.1 |
+| GyverBME280 | 1.5.4 | | GyverHTTP | 1.0.34 |
+| GyverDS3231 | 1.2.1 | | BSON | 3.0.1 |
+| | | | Stamp | 1.5.1 |
+| | | | Table | 1.3.6 |
+| | | | StreamIO | 1.0.5 |
+| | | | GyverIO | 1.4.2 |
+
+- Clone form: `git clone --depth 1 https://github.com/GyverLibs/<Name>.git libs/<Name>`.
+- `libs/` is in `.gitignore` (commit `84c65d0`); the nested upstream `.git` directories stay local and
+  never enter this repo.
+- An ignored `libs/README.md` records versions, short SHAs and exact commands. Reset with
+  `rm -rf libs` and re-clone, or `git -C libs/<Name> pull`.
+- The libraries are *not* vendored in git — the Arduino IDE still installs them from Library Manager
+  (see [`LightScheduler/README.md`](../LightScheduler/README.md)). This checkout is for offline
+  reading/verification, not for the build path.
+
+### 1.14 ESP32 core 3.x: миграция LEDC API (первая реальная компиляция)
+
+The project's first build with the real toolchain (`arduino-cli 1.5.1`, core `esp32:esp32 3.3.0`)
+failed on two lines in `light.cpp`: **core 3.0 removed the legacy LEDC API**
+(`'ledcSetup' was not declared in this scope`, `'ledcAttachPin' … did you mean 'ledcAttach'?`).
+The migration is mechanical and behavior-preserving:
+
+```cpp
+// было (core 2.x):
+ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RES);
+ledcAttachPin(PIN_PWM_LED, PWM_CHANNEL);
+ledcWrite(PWM_CHANNEL, duty);
+
+// стало (core 3.x):
+ledcAttachChannel(PIN_PWM_LED, PWM_FREQ, PWM_RES, PWM_CHANNEL);
+ledcWriteChannel(PWM_CHANNEL, duty);
+```
+
+- `ledcAttachChannel(pin, freq, res, channel)` заменяет пару `ledcSetup` + `ledcAttachPin`; параметры
+  проекта прежние — канал 0, 5 кГц, 8 бит, GPIO 5 (`PWM_CHANNEL`/`PWM_FREQ`/`PWM_RES`/`PIN_PWM_LED`).
+- `ledcWriteChannel(channel, duty)` — запись по номеру канала. В core 3.x появилась и перегрузка
+  `ledcWrite(pin, duty)` (по пину); её не используем, чтобы сохранить явный `PWM_CHANNEL`.
+- Диапазон `duty` прежний: `2^8 − 1 = 255`; поведение fade не изменилось — изменены только
+  API-вызовы в `light_setup` / `light_startFadeIn` / `light_stop` / `light_update`.
+- Итог сборки: exit 0, flash 1 093 751 / 1 310 720 B (83 %), RAM 48 972 / 327 680 B (14 %);
+  предупреждений из кода проекта нет (два предупреждения — из Settings и ESP32 core).
+- Требование: ядро **esp32 ≥ 3.0** (проверено на 3.3.0); со старым core 2.x проект не соберётся.
+- Sandbox-нюанс (не свойство проекта): если `~/.cache` смонтирован read-only, `arduino-cli` падает
+  на `build.options.json`; помогает `XDG_CACHE_HOME=/tmp/dsh-xdg-cache` или `--build-path /tmp/...`.
+- Процесс: компиляцию запускает только выделенный агент `compile-checker` (единственный владелец
+  `arduino-cli`); он возвращает diff, а git/docs обновляют Lead или другие агенты.
+
 ---
 
 ## 2. Verification without hardware or a toolchain
 
-The environment had no `arduino-cli`, no PlatformIO, no ESP32 core, no Arduino libraries, and no
-tests. These workarounds gave useful coverage anyway.
+At the time of the feature work the environment had no `arduino-cli`, no PlatformIO, no ESP32 core,
+no Arduino libraries, and no tests. These workarounds gave useful coverage anyway. A real toolchain
+was later installed and the firmware compiled for real (results in §1.14); the fallbacks below remain
+the record of how the features were verified before that.
 
 ### 2.1 Tri-verification of the LUT (docs ⇄ code ⇄ formula)
 
@@ -305,15 +371,17 @@ stubs for `Arduino.h`, `WiFi.h`, `LittleFS.h`, `SaverFile.h`, `Wire.h`, `GyverBM
 
 - Catches missing includes, wrong signatures against the *expected* API, typos, `static_assert`
   failures, format-argument mistakes.
-- The stub only has to declare what the code touches: `millis()`, `delay()`, `ledcSetup/AttachPin/
-  Write`, a `Serial` with `println/print/printf`, Wi-Fi calls, `SaverFile` as a template ctor,
+- The stub only has to declare what the code touches: `millis()`, `delay()`,
+  `ledcAttachChannel`/`ledcWriteChannel` (core 3.x API; before §1.14 it was `ledcSetup/AttachPin/Write`),
+  a `Serial` with `println/print/printf`, Wi-Fi calls, `SaverFile` as a template ctor,
   `Builder` widget methods (including both `uint8_t*` and `uint32_t*` Slider overloads), etc.
 - Requires compiling the `.ino` with `-x c++`.
 - **Harness quirk discovered:** each `bash` tool call runs in a fresh sandbox — files written to
   `/tmp` in one call are gone in the next. Create stubs and compile in the **same** invocation
   (`D=$(mktemp -d); …; rm -rf "$D"`).
 - It is **not** a substitute for a real compile against the actual libraries; treat as a syntax/API
-  smoke test.
+  smoke test. Since 2026-11-04 a real `arduino-cli` build is available (§1.14) and is the primary
+  build gate; the stub approach remains useful when no toolchain is present.
 
 ### 2.3 Host-side layout and default checks
 
@@ -365,48 +433,20 @@ Fast regression check if another widget is added later.
 
 ---
 
-## 3. Git / release hacks
+## 3. Release state and related docs
 
-- **Explicit-path staging** (`git add <12 files> docs/light-curve.md`) instead of `git add -A`,
-  with a pre-flight `git status --short` comparison against the expected set — prevents accidentally
-  committing build artifacts or unrelated files.
-- **Secret scan before commit:** grep the diff for `PASSWORD|TOKEN|API_KEY|PRIVATE KEY`; Wi-Fi
-  credentials stay empty strings in `config.h`.
-- **Push verification:** after `git push origin main`, assert
-  `git rev-parse HEAD == git rev-parse origin/main` **and** `git ls-remote origin refs/heads/main`
-  equals HEAD — the second check confirms the server actually has the new commit.
-- **GPG-signing sandbox workaround:** the first commit failed with exit 128 because `~/.gitconfig`
-  sets `commit.gpgsign=true` while the sandbox mounts `~/.gnupg` read-only. Fix without touching the
-  user's config:
-  `git -c commit.gpgsign=false commit -m "…"` (per-invocation override; nothing persisted). The
-  resulting commit is unsigned; if signed commits are mandatory, that needs a proper key setup and
-  (after push) a force-push of an amended commit — an explicit-approval operation.
-- **No history rewrite:** plain fast-forward push (`ed8c201..e97cec3`); never force/rebase.
-- Baseline convention: user's pre-work import commit `ed8c201`; feature release commit `e97cec3`
-  (12 modified + `docs/light-curve.md`, +518/−88).
+- History: `ed8c201` (user's baseline import) → `e97cec3` (three features + curve) → `2cf0285`
+  (gated tap + technical notes) → `84c65d0` (`.gitignore`: `libs/`) → compile-fix + docs-sync
+  release (2026-11-04: ESP32 core 3.x LEDC API, docs split; see `git log`). All pushes were
+  fast-forward; HEAD == origin/main after each release.
+- Release mechanics (explicit-path staging, secret scan, push verification, GPG-signing sandbox
+  workaround, unsigned-commit disclosure) and all agent-orchestration patterns now live in
+  [`lead-hacks.md`](lead-hacks.md).
+- The implementer's task-board lifecycle and phase conventions are in [`workflow.md`](workflow.md).
 
 ---
 
-## 4. Agent / workflow techniques
-
-- **Shared task board with dependencies and write scopes** avoided file conflicts: e.g. scheduler
-  (`.ino`) vs web UI (`webui.cpp`) ran in parallel; button work depended on both; docs depended on
-  all code; QA depended on docs. Advisory write scopes were enforced by the teammate, not the tool.
-- **Phased delegation with Lead review between phases** (Phase A data model+research → Phase B
-  scheduler+UI → Phase C curve+button). The Lead reviewed the diff and ran checks after each phase;
-  this caught scope drift early.
-- **Fresh-context teammate** (`impl-core`) received PROJECT.md context, exact field names, user
-  decisions, and the rule "if an edit is needed outside your write scope, stop and report". A
-  separate release teammate (`release-bot`) was spawned for git operations only.
-- **Teammate self-checks** were requested explicitly (mock compile, simulation, grep evidence), and
-  the Lead re-ran the critical ones independently (LUT tri-verification, layout check, behavior
-  simulation, remote HEAD check) — never trust a single agent's claim.
-- **Board has no comment field**: completion reports were sent via `send_message`, and QA results
-  were appended to the task description before marking it complete.
-
----
-
-## 5. Gotchas worth remembering
+## 4. Gotchas worth remembering
 
 - Don't change a raw-struct `SaverFile` payload without bumping its version char; padding bytes are
   part of the format.
@@ -423,15 +463,17 @@ Fast regression check if another widget is added later.
 - LUT indexing: do the `elapsed * 255` multiply in `uint32_t` (not `uint16_t`), and handle the exact
   final value in a separate branch.
 - 8-bit PWM cannot go below `1/255`; the first visible step is a real perceptual jump on a dim strip.
+- ESP32 core 3.x removed the legacy LEDC API (`ledcSetup`/`ledcAttachPin`/`ledcWrite(channel,…)`):
+  use `ledcAttachChannel()`/`ledcWriteChannel()` (§1.14). Stub-based checks can hide this because the
+  stub is whatever you wrote — only a real compile proves it.
 - `sensors_tick()` gating means the scheduler is inactive when the RTC is unsynced — fallbacks are
   never used for triggering, only for safe indexing.
 - In this harness, each `bash` call gets a fresh `/tmp`; do multi-file experiments in one invocation.
-- GPG signing + read-only `~/.gnupg` in a sandbox breaks `git commit`; use a per-invocation
-  `-c commit.gpgsign=false` and flag the unsigned result to the user.
+- Release/git-specific gotchas (GPG signing, push verification) are in [`lead-hacks.md`](lead-hacks.md).
 
 ---
 
-## 6. Quick reference
+## 5. Quick reference
 
 **Config (28 bytes):** master `enabled`, `snoozeMinutes` (1–60, default 10), `days[7]`
 (`0=Mon … 6=Sun`, each hour/minute/enabled, default 07:30/on), `fadeDuration` (0–60000 ms, default
@@ -464,7 +506,16 @@ hour == day.hour && minute == day.minute
 | master switch off | scheduled events disabled; tap-snooze still works if the light is on (manual override) |
 | per-day switch off | that weekday skipped; other days unaffected |
 
-**Hardware checklist (still pending):** Saver `'B'` migration from an old `/config.cfg`;
+**Local libraries:** `libs/` (git-ignored) contains Settings 1.4.3, Saver 1.1.0, EncButton 3.7.6,
+GyverBME280 1.5.4, GyverDS3231 1.2.1 plus 9 transitive deps; exact versions/SHAs in the ignored
+`libs/README.md` (§1.13).
+
+**Build (real toolchain, 2026-11-04):** `arduino-cli 1.5.1` + core `esp32:esp32 3.3.0`:
+`arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/` → exit 0, flash 1 093 751 / 1 310 720 B
+(83 %), RAM 48 972 / 327 680 B (14 %). Requires ESP32 core ≥ 3.0; only the `compile-checker` agent
+runs `arduino-cli` (§1.14).
+
+**Hardware checklist (still pending — build verified, device not):** Saver `'B'` migration from an old `/config.cfg`;
 DS3231 weekday/date mapping; 2 s hold boundary + debounce; tap-vs-hold feel; LED curve low-end and
 perceived smoothness; web UI day-group rendering + snooze persistence after reboot; power-cycle
 clears RAM snooze/skip (expected).
@@ -474,22 +525,28 @@ clears RAM snooze/skip (expected).
 ```bash
 # verify LUT docs ⇄ code ⇄ formula (run from repo root)
 python3 - <<'PY'
-import re, math
-def parse(s):
-    b = re.search(r'```cpp(.*?)```', s, re.S).group(1).splitlines()
-    i = next(n for n,l in enumerate(b) if 'CURVE_LUT' in l and '{' in l) + 1
+import math, re
+
+def parse_block(text):
+    lines = text.splitlines()
+    start = next(n for n, l in enumerate(lines) if 'CURVE_LUT' in l and '[' in l and '{' in l) + 1
     out = []
-    for l in b[i:]:
+    for l in lines[start:]:
         l = l.split('//')[0]
-        if l.strip().startswith('};'): break
+        if l.strip().startswith('};'):
+            break
         out += [int(x) for x in re.findall(r'\b\d{1,3}\b', l)]
     return out
-doc = parse(open('docs/light-curve.md', encoding='utf-8').read())
-cpp = parse(open('LightScheduler/light.cpp', encoding='utf-8').read())
-g = math.log(0.30)/math.log(0.50)
-exp = [int(math.floor(255*(i/255.0)**g + 0.5)) for i in range(256)]
-print('PASS' if doc == cpp == exp else 'FAIL', doc[128])
+
+doc = parse_block(open('docs/light-curve.md', encoding='utf-8').read())
+cpp = parse_block(open('LightScheduler/light.cpp', encoding='utf-8').read())
+g = math.log(0.30) / math.log(0.50)
+exp = [int(math.floor(255 * (i / 255.0) ** g + 0.5)) for i in range(256)]
+print('PASS' if doc == cpp == exp else 'FAIL', len(doc), doc[128])
 PY
+
+# build with the real toolchain (executed only by the compile-checker agent)
+arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/
 
 # release state checks
 git status --short

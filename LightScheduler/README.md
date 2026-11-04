@@ -33,6 +33,7 @@ LightScheduler/
 1. `Tools → Board → Boards Manager` → установить **esp32 by Espressif Systems**.
 2. Выбрать плату **ESP32 Dev Module**.
 3. `Tools → Partition Scheme` → схему с LittleFS/SPIFFS, например **Default 4MB with spiffs** (нужно место под `/config.cfg` и файловый менеджер вебморды).
+4. Нужно ядро **esp32 by Espressif Systems ≥ 3.0** (проверено на 3.3.0): прошивка использует LEDC API ядра 3.x (`ledcAttachChannel`/`ledcWriteChannel`); в core 3.0 вызовы `ledcSetup`/`ledcAttachPin`/`ledcWrite(channel, …)` удалены.
 
 ## Настройка
 
@@ -47,6 +48,8 @@ LightScheduler/
 1. Откройте `LightScheduler.ino` в Arduino IDE (все `.h/.cpp` должны лежать в этой же папке).
 2. Прошейте плату, откройте Serial Monitor (115200).
 3. После подключения к сети откройте в браузере IP-адрес устройства (указан в Serial-мониторе) — появится веб-интерфейс настроек.
+
+> Сборка проверена реальным тулчейном: `arduino-cli 1.5.1`, ядро `esp32:esp32 3.3.0`, команда `arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/` — успешно (flash ≈83 %, RAM ≈14 %).
 
 ## Логика
 
