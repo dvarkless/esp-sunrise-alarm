@@ -2,7 +2,7 @@
 #include <Arduino.h>
 
 // ===================== Датчики: BME280 + AHT10/20 + DS3231 =====================
-void  sensors_setup();        // Wire + BME280 + AHT10/20 + DS3231 (при первом запуске ставит время компиляции)
+void  sensors_setup();        // Wire + BME280 + AHT10/20 + DS3231 (при сброшенном RTC время берётся по NTP в webui_setup)
 bool  sensors_tick();         // вызывать в loop: вернёт true раз в секунду (обновит кэш; AHT — неблокирующе)
 
 bool  sensors_ok();           // BME280 инициализирован и доступен
@@ -21,3 +21,4 @@ uint8_t sensors_weekday();
 uint32_t sensors_date_key();
 String sensors_date_str();
 String sensors_time_str();
+void sensors_ntp_sync();   // взять время из Интернета (NTP), если RTC не синхронизирован; вызывать после WiFi (setup)

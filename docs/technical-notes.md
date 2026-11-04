@@ -30,11 +30,12 @@ struct Config {
     bool        enabled       = true;   // master switch
     uint8_t     snoozeMinutes = 10;
     DaySchedule days[7];                // [0]=Mon … [6]=Sun (ISO 8601)
-    uint32_t    fadeDuration  = 30000;
+    uint32_t    fadeDuration  = 15;     // minutes (0-60)
+    uint32_t    turnOffDelay  = 60;     // minutes (0-60), auto turn-off after the fade
 };
 ```
 
-- `sizeof(DaySchedule) == 3`, `sizeof(Config) == 28` on xtensa-gcc (Xtensa ABI is 4-byte aligned;
+- `sizeof(DaySchedule) == 3`, `sizeof(Config) == 32` on xtensa-gcc (Xtensa ABI is 4-byte aligned;
   one pad byte before `fadeDuration`).
 - Index mapping is direct: `days[sensors_weekday() - 1]`, because `weekDay()` is already ISO
   (`1=Mon … 7=Sun`). No lookup table needed.
@@ -49,13 +50,14 @@ casually reorder fields or change types: bump the Saver format version instead.
 ### 1.2 Saver format migration without migration code
 
 ```cpp
-SaverFile saver(LittleFS, "/config.cfg", config, 'B', 10, FileStore::Atomic);
-//                                              ^^^ was 'A'
+SaverFile saver(LittleFS, "/config.cfg", config, 'C', 10, FileStore::Atomic);
+//                                              ^^^ was 'B'
 ```
 
 - Saver's header stores `ver` **and** data size. `begin()` copies stored data only when both match;
   otherwise it treats current RAM (the defaults) as the new config and rewrites the file.
-- Bumping `'A' → 'B'` therefore gave a free, atomic, one-time settings reset after the struct change.
+- Bumping `'B' → 'C'` therefore gave a free, atomic, one-time settings reset after the struct change
+  (`fadeDuration` switched to minutes + `turnOffDelay` added).
   No compatibility shim, no versioned parser.
 - Trade-off accepted: user settings are lost once on upgrade. This is documented in
   [`PROJECT.md`](../PROJECT.md) and [`LightScheduler/README.md`](../LightScheduler/README.md).
@@ -196,26 +198,28 @@ static const uint8_t CURVE_LUT[256] = { /* 256-byte table from docs/light-curve.
 static_assert(sizeof(CURVE_LUT) == 256, "CURVE_LUT: ожидается 256 байт");
 
 uint32_t elapsed = now - fadeStart;
-uint32_t dur     = config.fadeDuration;
+uint32_t dur     = fading ? config.fadeDuration * 60 * 1000 : config.turnOffDelay * 60 * 1000;
 
 if (!dur || elapsed >= dur) { ledcWriteChannel(PWM_CHANNEL, 255); fading = false; return; }
 
-uint16_t idx = (uint16_t)(elapsed * 255UL / dur);   // elapsed ≤ 60000 => product < 15.3e6
+uint16_t idx = (uint16_t)(elapsed * 255UL / dur);   // elapsed ≤ 3.6e6 => product < 918e6
 ledcWriteChannel(PWM_CHANNEL, CURVE_LUT[idx]);
 ```
 
 Hacks / details worth remembering:
 - **Time-based progress**, not per-step accumulation: no float drift; a delayed loop tick just jumps
   to the correct duty.
-- `elapsed*255` fits `uint32` because the UI slider caps `fadeDuration` at 60 000 ms. `idx ≤ 254` in
+- `elapsed*255` fits `uint32` because the UI slider caps `fadeDuration` at 60 minutes (3.6e6 ms →
+  product < 918e6). `idx ≤ 254` in
   the curve branch; exact `255` is handled by the dedicated end branch.
 - On ESP32, `static const` arrays live in flash — no `PROGMEM`/`pgm_read_byte` needed (0 extra RAM).
 - `static_assert` makes a table-size regression a compile-time error.
 - Quantization reality check: with half-up rounding the first nonzero duty is `LUT[8]` (≈3.1 % of the
   fade); the unavoidable `0→1` step is the visible low-end limit of 8-bit PWM. Future option: 10-bit
   PWM + 1024×`uint16_t` LUT (~2 KB) or dithering.
-- `fadeDuration = 0` and `< FADE_STEP_MS` both become "max on the first 50 ms step" — same behavior as
-  before the feature.
+- `fadeDuration = 0` and `< FADE_STEP_MS` both become "max on the first 500 ms step" — same behavior as
+  before the feature. After the fade ends, the lamp stays on for `turnOffDelay` minutes and then
+  `light_update()` calls `light_stop()`.
 
 **Regenerate the table (offline, not shipped):**
 
@@ -336,7 +340,7 @@ ledcWriteChannel(PWM_CHANNEL, duty);
 ```
 
 - `ledcAttachChannel(pin, freq, res, channel)` заменяет пару `ledcSetup` + `ledcAttachPin`; параметры
-  проекта прежние — канал 0, 5 кГц, 8 бит, GPIO 5 (`PWM_CHANNEL`/`PWM_FREQ`/`PWM_RES`/`PIN_PWM_LED`).
+  проекта прежние — канал 0, 25 кГц, 8 бит, GPIO 5 (`PWM_CHANNEL`/`PWM_FREQ`/`PWM_RES`/`PIN_PWM_LED`).
 - `ledcWriteChannel(channel, duty)` — запись по номеру канала. В core 3.x появилась и перегрузка
   `ledcWrite(pin, duty)` (по пину); её не используем, чтобы сохранить явный `PWM_CHANNEL`.
 - Диапазон `duty` прежний: `2^8 − 1 = 255`; поведение fade не изменилось — изменены только
@@ -539,9 +543,9 @@ Fast regression check if another widget is added later.
 
 ## 5. Quick reference
 
-**Config (28 bytes):** master `enabled`, `snoozeMinutes` (1–60, default 10), `days[7]`
-(`0=Mon … 6=Sun`, each hour/minute/enabled, default 07:30/on), `fadeDuration` (0–60000 ms, default
-30000).
+**Config (32 bytes):** master `enabled`, `snoozeMinutes` (1–60, default 10), `days[7]`
+(`0=Mon … 6=Sun`, each hour/minute/enabled, default 07:30/on), `fadeDuration` (0–60 min, default 15),
+`turnOffDelay` (0–60 min, default 60).
 
 **Curve:** `d(p)=p^1.7369656`; `LUT[128]=77` → ≈30.2 % duty at 50 % progress; `LUT[0]=0`,
 `LUT[255]=255`; first nonzero `LUT[8]`.
@@ -566,7 +570,7 @@ hour == day.hour && minute == day.minute
 | tap, light off | no-op: no stop, no snooze start/restart; log line only; the schedule fires normally later |
 | tap while a snooze is pending (light off) | no-op (cannot restart/extend the countdown) |
 | hold ≥ 2 s | light off, snooze cancelled, skip today only (auto re-arm tomorrow) |
-| web «Розжечь сейчас» | immediate fade; no effect on snooze/skip/alarm state |
+| web «Запуск будильника» | immediate fade; no effect on snooze/skip/alarm state |
 | master switch off | scheduled events disabled; tap-snooze still works if the light is on (manual override) |
 | per-day switch off | that weekday skipped; other days unaffected |
 
@@ -575,18 +579,25 @@ AHT10/AHT20 at `0x38` via a non-blocking trigger→poll→read machine (2 s cade
 500 ms timeout), BME280 fallback when AHT is missing or data is >10 s old; the 1 Hz RTC gate and the
 scheduler are untouched (§1.15–§1.16).
 
+**Time / NTP:** when the DS3231 loses power (`rtc.isReset()`), the RTC stays unsynced (the old
+`setBuildTime()` is gone); `sensors_ntp_sync()` fetches the time over NTP (`configTime` +
+`getLocalTime` via `pool.ntp.org`, 5 s timeout) and writes it with `rtc.setTime(...)`, called from
+`webui_setup()` after Wi-Fi connects. Start time («Старт: …») and settings-save events
+(«Настройки сохранены: …») are timestamped into the `Log` widget; Date/Time are live `Label`s in
+the UI.
+
 **Local libraries:** `libs/` (git-ignored) contains Settings 1.4.3, Saver 1.1.0, EncButton 3.7.6,
 GyverBME280 1.5.4, GyverDS3231 1.2.1 plus 9 transitive deps; exact versions/SHAs in the ignored
 `libs/README.md` (§1.13). AHT uses the installed Arduino libraries Adafruit AHTX0 2.0.6 +
 Adafruit BusIO + Adafruit Unified Sensor 1.1.15 (not part of `libs/`).
 
 **Build (real toolchain, 2026-11-04):** `arduino-cli 1.5.1` + core `esp32:esp32 3.3.0`:
-`arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/` → exit 0. Latest build (after AHT
-humidity + BME280 filtration): flash 1 097 051 / 1 310 720 B (83 %), RAM 49 028 / 327 680 B (14 %),
+`arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/` → exit 0. Latest build (after NTP +
+logs + auto-off): flash 1 116 187 / 1 310 720 B (85 %), RAM 49 384 / 327 680 B (15 %),
 no project warnings. Requires ESP32 core ≥ 3.0 and the Adafruit AHTX0/BusIO/Unified Sensor libraries;
 only the `compile-checker` agent runs `arduino-cli` (§1.14).
 
-**Hardware checklist (still pending — build verified, device not):** Saver `'B'` migration from an old `/config.cfg`;
+**Hardware checklist (still pending — build verified, device not):** Saver `'C'` migration from an old `/config.cfg`;
 DS3231 weekday/date mapping; 2 s hold boundary + debounce; tap-vs-hold feel; LED curve low-end and
 perceived smoothness; web UI day-group rendering + snooze persistence after reboot; power-cycle
 clears RAM snooze/skip (expected); **new:** AHT10/AHT20 present at `0x38` and humidity in the UI,

@@ -2,6 +2,7 @@
 #include "config.h"
 #include "log.h"
 
+#include <time.h>
 #include <Wire.h>
 #include <Adafruit_AHTX0.h>
 #include <GyverBME280.h>
@@ -49,6 +50,26 @@ static uint32_t ahtGoodMs  = 0;      // millis() последнего успеш
 // Важно: setFilter() обязан идти ДО begin() — коэффициент записывается в 0xF5 внутри begin().
 static const uint8_t BME_FILTER_MODE = FILTER_COEF_16;
 
+// --- Синхронизация времени по NTP (если RTC был сброшен при отключении питания) ---
+static const char*   const NTP_SERVER     = "pool.ntp.org";
+static const uint32_t      NTP_TIMEOUT_MS = 5000;
+
+void sensors_ntp_sync() {
+    if (rtc.synced()) return;  // время уже есть — NTP не нужен
+    log_print(F("Sensors: синхронизация времени по NTP..."));
+    configTime((long)TIME_ZONE * 3600, 0, NTP_SERVER);
+    struct tm t;
+    if (!getLocalTime(&t, NTP_TIMEOUT_MS)) {
+        log_println(F(" не удалась (нет Интернета)"));
+        return;
+    }
+    if (!rtc.setTime(t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec)) {
+        log_println(F(" не удалась (ошибка записи в RTC)"));
+        return;
+    }
+    log_println(F(" ок"));
+}
+
 void sensors_setup() {
     Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
 
@@ -58,8 +79,7 @@ void sensors_setup() {
     if (!rtc.isOK()) {
         log_println(F("Sensors: DS3231 не найден на шине I2C"));
     } else if (rtc.isReset()) {
-        // Время RTC не установлено (сброс питания) — ставим время компиляции прошивки
-        //rtc.setBuildTime();
+        // Время RTC не установлено (сброс питания) — время будет взято по NTP в webui_setup()
         log_println(F("Sensors: RTC был сброшен!"));
     }
 

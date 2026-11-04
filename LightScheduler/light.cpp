@@ -67,8 +67,8 @@ void light_update() {
     uint32_t elapsed = millis() - fadeStart;
     uint32_t dur = fading ? config.fadeDuration*60*1000 : config.turnOffDelay*60*1000;
 
-    // dur <= 60000 и elapsed < dur => elapsed*255 < 15.3 млн (uint32), idx <= 254;
-    // 255 выставляется отдельной веткой выше. Накопления нет — дрейфа нет.
+    // dur до 3 600 000 мс (60 мин) и elapsed < dur => elapsed*255 < ~918 млн (умещается
+    // в uint32), idx <= 254; 255 выставляется отдельной веткой выше. Накопления нет — дрейфа нет.
     if (fading) {
         if (!dur || elapsed >= dur) {
             ledcWriteChannel(PWM_CHANNEL, 255);

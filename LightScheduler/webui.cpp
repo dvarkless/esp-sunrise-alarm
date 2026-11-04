@@ -82,6 +82,8 @@ void update(sets::Updater& upd) {
     upd.update(ID_TEMP,  sensors_temperature());
     upd.update(ID_HUM,   sensors_humidity());
     upd.update(ID_PRESS, sensors_pressure());
+    upd.update(ID_DATE, sensors_date_str());
+    upd.update(ID_TIME, sensors_time_str());
     upd.update(ID_LOG, logger);
 }
 
@@ -113,6 +115,10 @@ static void wifiConnect() {
 
 void webui_setup() {
     wifiConnect();
+
+    if (WiFi.status() == WL_CONNECTED) {
+        sensors_ntp_sync();  // если RTC был сброшен — взять время из Интернета
+    }
 
     sett.begin();
     sett.onBuild(build);
