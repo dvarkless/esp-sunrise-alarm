@@ -69,3 +69,6 @@ Testing/
 
 # Local Gyver libraries (downloaded for offline builds)
 libs/
+
+# Local task-board snapshot (Lead/PM bookkeeping, never committed)
+TASKS.md
