@@ -2,6 +2,7 @@
 #include "config.h"
 #include "light.h"
 #include "sensors.h"
+#include "log.h"
 
 #include <WiFi.h>
 #include <SettingsGyver.h>
@@ -13,6 +14,7 @@ enum : size_t {
     ID_TEMP = 1,
     ID_HUM  = 2,
     ID_PRESS = 3,
+    ID_LOG = 4,
 };
 
 // Имена дней недели для подписей: индекс 0=Пн ... 6=Вс (ISO 8601)
@@ -62,6 +64,9 @@ void build(sets::Builder& b) {
         b.LabelFloat(ID_HUM,   "Влажность (%)",    sensors_humidity(),    1);
         b.LabelFloat(ID_PRESS, "Давление (гПа)",   sensors_pressure(),    1);
     }
+
+    // Виджет-лог: сюда уходит всё, что пишется через log_*() (и в Serial). Последний элемент страницы.
+    b.Log(ID_LOG, logger, "Лог");
 }
 
 // Вызывается браузером периодически (режим без WebSocket) — отдаём свежие показания датчиков
@@ -69,6 +74,7 @@ void update(sets::Updater& upd) {
     upd.update(ID_TEMP,  sensors_temperature());
     upd.update(ID_HUM,   sensors_humidity());
     upd.update(ID_PRESS, sensors_pressure());
+    upd.update(ID_LOG, logger);
 }
 
 // Подключение к WiFi. Если SSID не задан — поднимаем точку доступа для настройки/отладки.
@@ -77,23 +83,23 @@ static void wifiConnect() {
 
     if (WIFI_SSID[0]) {
         WiFi.begin(WIFI_SSID, WIFI_PASS);
-        Serial.print(F("WiFi: подключение"));
+        log_print(F("WiFi: подключение"));
         uint32_t tmr = millis();
         while (WiFi.status() != WL_CONNECTED && millis() - tmr < 15000UL) {
             delay(500);
-            Serial.print('.');
+            log_print('.');
         }
-        Serial.println();
+        log_println();
     }
 
     if (WiFi.status() == WL_CONNECTED) {
-        Serial.print(F("WiFi: подключено, IP "));
-        Serial.println(WiFi.localIP());
+        log_print(F("WiFi: подключено, IP "));
+        log_println(WiFi.localIP());
     } else {
         WiFi.mode(WIFI_AP);
         WiFi.softAP(AP_NAME);
-        Serial.print(F("WiFi: точка доступа " AP_NAME ", IP "));
-        Serial.println(WiFi.softAPIP());
+        log_print(F("WiFi: точка доступа " AP_NAME ", IP "));
+        log_println(WiFi.softAPIP());
     }
 }
 

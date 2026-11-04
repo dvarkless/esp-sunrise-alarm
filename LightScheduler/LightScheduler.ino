@@ -12,6 +12,7 @@
 #include "light.h"
 #include "button.h"
 #include "webui.h"
+#include "log.h"
 
 // Имена дней недели для логов: индекс 0=Пн ... 6=Вс (ISO 8601)
 static const char* const WEEKDAY_NAMES[7] = {"Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"};
@@ -27,8 +28,8 @@ static uint32_t skipDateKey   = 0;      // ГГГГММДД дня, розжиг
 
 void setup() {
     Serial.begin(115200);
-    Serial.println();
-    Serial.println(F("Smart Scheduled Light Controller"));
+    log_println();
+    log_println(F("Smart Scheduled Light Controller"));
 
     config_setup();   // LittleFS + загрузка/сохранение конфига
     sensors_setup();  // I2C, BME280, DS3231
@@ -36,7 +37,7 @@ void setup() {
     button_setup();   // EncButton
     webui_setup();    // WiFi + веб-интерфейс
 
-    Serial.println(F("Готово"));
+    log_println(F("Готово"));
 }
 
 void loop() {
@@ -51,15 +52,15 @@ void loop() {
         if (!light_isOn()) {
             // Свет выключен — клик ничего не делает: «откладывать» нечего.
             // Ручное включение осталось только в веб-интерфейсе («Розжечь сейчас»).
-            Serial.println(F("Кнопка: клик проигнорирован (свет выключен)"));
+            log_println(F("Кнопка: клик проигнорирован (свет выключен)"));
         } else {
             // Свет разгорается или уже горит — гасим и откладываем розжиг на snoozeMinutes.
             light_stop();
             snoozePending = false;  // отменяем предыдущий отсчёт, если был
             snoozeStartMs = millis();
             snoozePending = true;
-            Serial.printf("Кнопка: отложено на %u мин\r\n",
-                          (unsigned)(config.snoozeMinutes ? config.snoozeMinutes : 1));
+            app_log_printf("Кнопка: отложено на %u мин\r\n",
+                       (unsigned)(config.snoozeMinutes ? config.snoozeMinutes : 1));
         }
     }
     if (button_hold()) {
@@ -68,7 +69,7 @@ void loop() {
         light_stop();
         snoozePending = false;
         skipDateKey = sensors_date_key();
-        Serial.printf("Кнопка: пропуск сегодня (%lu)\r\n", (unsigned long)skipDateKey);
+        app_log_printf("Кнопка: пропуск сегодня (%lu)\r\n", (unsigned long)skipDateKey);
     }
 
     // --- Расписание: раз в секунду ---
@@ -93,7 +94,7 @@ void loop() {
         if (config.enabled && day.enabled && !alarmTriggered && !snoozePending &&
             sensors_date_key() != skipDateKey &&
             curHour == day.hour && curMin == day.minute) {
-            Serial.printf("Расписание: розжиг %s %02u:%02u\r\n", WEEKDAY_NAMES[dayIdx], curHour, curMin);
+            app_log_printf("Расписание: розжиг %s %02u:%02u\r\n", WEEKDAY_NAMES[dayIdx], curHour, curMin);
             light_startFadeIn();
             alarmTriggered = true;  // защита от повторного запуска в эту минуту
         }
@@ -106,7 +107,7 @@ void loop() {
     if (snoozePending) {
         uint32_t snoozeMs = (uint32_t)(config.snoozeMinutes ? config.snoozeMinutes : 1) * 60000UL;
         if (millis() - snoozeStartMs >= snoozeMs) {
-            Serial.println(F("Кнопка: отложенный розжиг"));
+            log_println(F("Кнопка: отложенный розжиг"));
             light_startFadeIn();
             snoozePending = false;
             alarmTriggered = true;  // защита от повторного запуска в эту же минуту

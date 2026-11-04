@@ -11,7 +11,8 @@ LightScheduler/
 ├── sensors.h / .cpp     // BME280 (температура/давление) + AHT10/20 (влажность) и DS3231 (+ день недели и ключ даты)
 ├── light.h / .cpp       // плавный розжиг через LEDC, перцептуальная кривая CURVE_LUT, флаг включения
 ├── button.h / .cpp      // EncButton: клик и удержание 2 с
-└── webui.h / .cpp       // веб-интерфейс настроек (Settings) + WiFi
+├── webui.h / .cpp       // веб-интерфейс настроек (Settings) + WiFi
+└── log.h / .cpp         // общий логгер: Serial + веб-виджет Log (sets::Logger)
 ```
 
 ## Установка библиотек (Arduino IDE)

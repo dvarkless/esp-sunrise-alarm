@@ -248,6 +248,12 @@ assert all(lut[i] <= lut[i+1] for i in range(255))
   inside the «Расписание» group, each titled with the day name.
 - Widgets only exist during `onBuild`; the sensor values are refreshed via `onUpdate` IDs 1/2/3
   (polling mode, no WebSocket).
+- **`Log` widget = web serial**: `sets::Logger` (a `Print`-compatible ring buffer) + `b.Log(id,
+  logger, label)` in `build()` and `upd.update(id, logger)` in `update()` streams the last bytes of
+  log text to the browser in polling mode (no WebSocket). Use the explicit-id form `b.Log(ID_LOG,
+  logger, "Лог")` — the library's auto-id `b.Log(logger)` never receives updates. Our `log.h`/
+  `log.cpp` mirror every log line to both `Serial` and this logger; the widget is the last element
+  on the page.
 
 ### 1.11 Loop hygiene
 
@@ -524,6 +530,9 @@ Fast regression check if another widget is added later.
 - `sensors_tick()` gating means the scheduler is inactive when the RTC is unsynced — fallbacks are
   never used for triggering, only for safe indexing.
 - In this harness, each `bash` call gets a fresh `/tmp`; do multi-file experiments in one invocation.
+- ESP32 core already declares `int log_printf(const char*, ...)` (`esp32-hal-log.h`, pulled in via
+  `Arduino.h`) — a project helper of the same name is an "ambiguating new declaration". We name ours
+  `app_log_printf` to avoid the collision.
 - Release/git-specific gotchas (GPG signing, push verification) are in [`lead-hacks.md`](lead-hacks.md).
 
 ---

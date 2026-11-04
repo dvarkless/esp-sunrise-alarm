@@ -1,5 +1,6 @@
 #include "sensors.h"
 #include "config.h"
+#include "log.h"
 
 #include <Wire.h>
 #include <Adafruit_AHTX0.h>
@@ -55,22 +56,22 @@ void sensors_setup() {
 
     rtc.begin();
     if (!rtc.isOK()) {
-        Serial.println(F("Sensors: DS3231 не найден на шине I2C"));
+        log_println(F("Sensors: DS3231 не найден на шине I2C"));
     } else if (rtc.isReset()) {
         // Время RTC не установлено (сброс питания) — ставим время компиляции прошивки
         rtc.setBuildTime();
-        Serial.println(F("Sensors: RTC был сброшен, установлено время компиляции"));
+        log_println(F("Sensors: RTC был сброшен, установлено время компиляции"));
     }
 
     bme.setFilter(BME_FILTER_MODE);  // IIR x16, см. BME_FILTER_MODE
     ok = bme.begin(BME280_ADDR);
-    Serial.println(ok ? F("Sensors: BME280 OK") : F("Sensors: BME280 не найден"));
+    log_println(ok ? F("Sensors: BME280 OK") : F("Sensors: BME280 не найден"));
 
     // AHT10/AHT20 — основной источник влажности. Блокирующие задержки внутри begin() здесь допустимы:
     // это setup(), а не loop(). Если AHT не отвечает — влажность продолжит приходить с BME280.
     ahtOk = aht.begin(&Wire, 0, AHT_ADDR);
-    Serial.println(ahtOk ? F("Sensors: AHT10/20 OK — влажность с AHT")
-                         : F("Sensors: AHT10/20 не найден — влажность с BME280 (запасной вариант)"));
+    log_println(ahtOk ? F("Sensors: AHT10/20 OK — влажность с AHT")
+                      : F("Sensors: AHT10/20 не найден — влажность с BME280 (запасной вариант)"));
 }
 
 // Неблокирующий шаг AHT10/AHT20: триггер -> опрос готовности -> чтение 6 байт -> кэш.
