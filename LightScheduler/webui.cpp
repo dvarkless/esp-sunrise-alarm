@@ -36,13 +36,13 @@ void build(sets::Builder& b) {
         // Изменения сразу пишутся в config.days[i], Saver сохранит их автоматически.
         char label[32];
         for (uint8_t i = 0; i < 7; i++) {
-            sets::Row day(b, DAY_NAMES[i]);
             snprintf(label, sizeof(label), "Включено (%s)", DAY_NAMES[i]);
             b.Switch(label, &config.days[i].enabled);
-            snprintf(label, sizeof(label), "Часы (%s)", DAY_NAMES[i]);
+            sets::Row day(b, DAY_NAMES[i]);
+            snprintf(label, sizeof(label), "Часы");
             b.Spinner(label, 0, 23, 1, &config.days[i].hour);
-            snprintf(label, sizeof(label), "Минуты (%s)", DAY_NAMES[i]);
-            b.Spinner(label, 0, 59, 1, &config.days[i].minute);
+            snprintf(label, sizeof(label), "Минуты");
+            b.Spinner(label, 0, 55, 5, &config.days[i].minute);
         }
     }
 
