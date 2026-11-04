@@ -34,8 +34,7 @@ static uint32_t fadeStart = 0;      // millis() начала розжига
 static uint32_t lastStep  = 0;      // millis() последнего шага ШИМ
 
 void light_setup() {
-    ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RES);
-    ledcAttachPin(PIN_PWM_LED, PWM_CHANNEL);
+    ledcAttachChannel(PIN_PWM_LED, PWM_FREQ, PWM_RES, PWM_CHANNEL);
     light_stop();
 }
 
@@ -44,13 +43,13 @@ void light_startFadeIn() {
     fading = true;
     fadeStart = millis();
     lastStep = fadeStart;
-    ledcWrite(PWM_CHANNEL, 0);
+    ledcWriteChannel(PWM_CHANNEL, 0);
 }
 
 void light_stop() {
     on = false;
     fading = false;
-    ledcWrite(PWM_CHANNEL, 0);
+    ledcWriteChannel(PWM_CHANNEL, 0);
 }
 
 bool light_active() {
@@ -73,7 +72,7 @@ void light_update() {
 
     // 0 мс или розжиг завершён — сразу максимум и остановка
     if (!dur || elapsed >= dur) {
-        ledcWrite(PWM_CHANNEL, 255);
+        ledcWriteChannel(PWM_CHANNEL, 255);
         fading = false;
         return;
     }
@@ -81,5 +80,5 @@ void light_update() {
     // dur <= 60000 и elapsed < dur => elapsed*255 < 15.3 млн (uint32), idx <= 254;
     // 255 выставляется отдельной веткой выше. Накопления нет — дрейфа нет.
     uint16_t idx = (uint16_t)(elapsed * 255UL / dur);
-    ledcWrite(PWM_CHANNEL, CURVE_LUT[idx]);  // при PWM_RES = 8 допустим диапазон 0..255
+    ledcWriteChannel(PWM_CHANNEL, CURVE_LUT[idx]);  // при PWM_RES = 8 допустим диапазон 0..255
 }
