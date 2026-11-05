@@ -82,9 +82,9 @@ void update(sets::Updater& upd) {
     upd.update(ID_TEMP,  sensors_temperature());
     upd.update(ID_HUM,   sensors_humidity());
     upd.update(ID_PRESS, sensors_pressure());
-    upd.update(ID_DATE, sensors_date_str());
-    upd.update(ID_TIME, sensors_time_str());
-    upd.update(ID_LOG, logger);
+    upd.update(ID_DATE,  sensors_date_str());
+    upd.update(ID_TIME,  sensors_time_str());
+    upd.update(ID_LOG,   logger);
 }
 
 // Подключение к WiFi. Если SSID не задан — поднимаем точку доступа для настройки/отладки.

@@ -1,9 +1,9 @@
 #include "config.h"
+#include "log.h"
+#include "sensors.h"
 
 #include <LittleFS.h>
 #include <SaverFile.h>
-#include "log.h"
-#include "sensors.h"
 
 // Глобальный конфиг (значения по умолчанию заданы в структуре Config)
 Config config;

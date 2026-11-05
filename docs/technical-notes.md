@@ -504,6 +504,8 @@ Fast regression check if another widget is added later.
   workaround, unsigned-commit disclosure) and all agent-orchestration patterns now live in
   [`lead-hacks.md`](lead-hacks.md).
 - The implementer's task-board lifecycle and phase conventions are in [`workflow.md`](workflow.md).
+- The code style distilled from the vendored GyverLibs and this firmware is in
+  [`code-style.md`](code-style.md) — read it before writing or reviewing code.
 
 ---
 

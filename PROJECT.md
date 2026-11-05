@@ -20,7 +20,8 @@ esp-sunrise-alarm/
 │   ├── light-curve.md      // исследование кривой розжига: формула, LUT, обоснование
 │   ├── technical-notes.md  // инженерные заметки: приёмы прошивки и способы верификации
 │   ├── workflow.md         // процесс реализации: жизненный цикл задач, фазы, отчётность
-│   └── lead-hacks.md       // playbook Team Lead: делегирование, QA, релизы
+│   ├── lead-hacks.md       // playbook Team Lead: делегирование, QA, релизы
+│   └── code-style.md       // стиль кода: конвенции GyverLibs, модули, форматирование
 └── LightScheduler/         // прошивка (скетч + модули)
     ├── LightScheduler.ino  // setup() + неблокирующий loop(), расписание и состояние кнопки
     ├── config.h            // пины, PWM, I2C, WiFi, struct Config, прототипы

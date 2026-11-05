@@ -15,10 +15,10 @@ uint8_t sensors_minute();     // текущая минута по RTC (0-59)
 
 // День недели по RTC: 1=Пн ... 7=Вс (ISO 8601). При несинхронизированном RTC — 1 (Пн),
 // но расписание в этом режиме не тикает: sensors_tick() не вернёт true.
-uint8_t sensors_weekday();
+uint8_t  sensors_weekday();
 // Ключ календарного дня ГГГГММДД (например, 20261102) для детекта смены суток и «пропуска
 // сегодня». 0 — RTC не синхронизирован, валидного дня нет.
 uint32_t sensors_date_key();
-String sensors_date_str();
-String sensors_time_str();
-void sensors_ntp_sync();   // взять время из Интернета (NTP), если RTC не синхронизирован; вызывать после WiFi (setup)
+String   sensors_date_str();  // строка даты RTC (для веб-виджета «Дата» и логов)
+String   sensors_time_str();  // строка времени RTC (для веб-виджета «Время» и логов)
+void     sensors_ntp_sync();  // взять время из Интернета (NTP), если RTC не синхронизирован; вызывать после WiFi

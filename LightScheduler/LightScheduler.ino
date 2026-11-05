@@ -66,7 +66,7 @@ void loop() {
             snoozeStartMs = millis();
             snoozePending = true;
             app_log_printf("Кнопка: отложено на %u мин\r\n",
-                       (unsigned)(config.snoozeMinutes ? config.snoozeMinutes : 1));
+                           (unsigned)(config.snoozeMinutes ? config.snoozeMinutes : 1));
         }
     }
     if (button_hold()) {

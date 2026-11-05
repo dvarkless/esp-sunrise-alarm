@@ -65,7 +65,7 @@ void light_update() {
     lastStep = millis();
 
     uint32_t elapsed = millis() - fadeStart;
-    uint32_t dur = fading ? config.fadeDuration*60*1000 : config.turnOffDelay*60*1000;
+    uint32_t dur = fading ? config.fadeDuration * 60 * 1000 : config.turnOffDelay * 60 * 1000;
 
     // dur до 3 600 000 мс (60 мин) и elapsed < dur => elapsed*255 < ~918 млн (умещается
     // в uint32), idx <= 254; 255 выставляется отдельной веткой выше. Накопления нет — дрейфа нет.
