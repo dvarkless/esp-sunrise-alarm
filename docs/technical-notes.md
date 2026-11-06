@@ -342,8 +342,10 @@ ledcWriteChannel(PWM_CHANNEL, duty);
 ```
 
 - `ledcAttachChannel(pin, freq, res, channel)` заменяет пару `ledcSetup` + `ledcAttachPin`; параметры
-  проекта прежние — канал 0, 25 кГц, 8 бит, GPIO 5 на ESP32 (`PWM_CHANNEL`/`PWM_FREQ`/`PWM_RES`/
-  `PIN_PWM_LED`); на ESP8266 ШИМ через `analogWrite` на GPIO 14, `PWM_CHANNEL` там не используется (§1.17).
+  проекта прежние — канал 0, 25 кГц, 8 бит. На момент §1.14 (до порта ESP8266) PWM был на GPIO 5
+  ESP32 (`PWM_CHANNEL`/`PWM_FREQ`/`PWM_RES`/`PIN_PWM_LED`); сейчас `PIN_PWM_LED` — единая разводка
+  Wemos D1 mini (D8/GPIO 15) для обеих сборок, на ESP8266 ШИМ через `analogWrite`, `PWM_CHANNEL`
+  там не используется (§1.17).
 - `ledcWriteChannel(channel, duty)` — запись по номеру канала. В core 3.x появилась и перегрузка
   `ledcWrite(pin, duty)` (по пину); её не используем, чтобы сохранить явный `PWM_CHANNEL`.
 - Диапазон `duty` прежний: `2^8 − 1 = 255`; поведение fade не изменилось — изменены только
@@ -424,19 +426,22 @@ platform before anything else sees it:
 
 The Arduino build system passes `-DARDUINO_ARCH_{build.arch}` (uppercased) in every compile recipe,
 so the `ARDUINO_ARCH_*` macros are guaranteed; the cores also define `ESP8266` / `ESP32` (belt and
-braces; ESP8266 is checked first, as in GyverLibs). Pins live in this header per board:
+braces; ESP8266 is checked first, as in GyverLibs). Pins are **board wiring**, not a platform
+property, so they are a single unconditional set here — the project board is a **Wemos D1 mini**:
 
-| Pin | ESP32 | ESP8266 |
+| Pin | Board pin | GPIO |
 |---|---|---|
-| `PIN_PWM_LED` | GPIO 5 | GPIO 14 (D5) |
-| `PIN_I2C_SDA` | GPIO 21 | GPIO 4 (D2) |
-| `PIN_I2C_SCL` | GPIO 22 | GPIO 5 (D1) |
-| `PIN_BUTTON` | GPIO 27 | GPIO 13 (D7) |
+| `PIN_PWM_LED` | D8 | GPIO 15 |
+| `PIN_I2C_SDA` | D2 | GPIO 4 |
+| `PIN_I2C_SCL` | D1 | GPIO 5 |
+| `PIN_BUTTON` | D4 | GPIO 2 |
 
-ESP8266 pin rationale: avoid the strapping pins (GPIO 0/2/12/15/16 — boot-mode side effects), the
-UART pins (GPIO 1/3) and the flash pins (6–11); GPIO 16 has no PWM. D5/D2/D1/D7 are the usual
-NodeMCU/Wemos choices; the button uses `INPUT_PULLUP` to GND. `PWM_CHANNEL` (LEDC channel 0) stays
-ESP32-only.
+Wiring notes: D1/D2 are the ESP8266 default I2C pins (SCL/SDA, GPIO 5/4). D4 (GPIO 2) and D8
+(GPIO 15) are ESP8266 **strapping pins**: GPIO 2 must be HIGH at boot (button to GND with
+`INPUT_PULLUP` satisfies this when not pressed; the onboard LED also sits on D4) and GPIO 15 must be
+LOW at boot (external pull-down; PWM output works after boot). GPIO 16 (D0) has no PWM. `PWM_CHANNEL`
+(LEDC channel 0) stays ESP32-only; an ESP32 build uses the same GPIO numbers (valid outputs, but a
+different physical board wiring).
 
 **PWM abstraction.** ESP32 uses LEDC core 3.x; ESP8266 core 3.1.2 has **no** `ledc*` — its PWM is
 `analogWrite` (`analogWriteFreq` clamps 100..60000 Hz, `analogWriteRange()` defaults to 255 in core
@@ -652,9 +657,10 @@ Fast regression check if another widget is added later.
 `LUT[255]=255`; first nonzero `LUT[8]`.
 
 **Platform:** `board.h` selects `LS_BOARD_ESP32` / `LS_BOARD_ESP8266` (ESP8266 checked first) and
-pins: ESP32 GPIO 5/21/22/27, ESP8266 GPIO 14/4/5/13 (`PIN_PWM_LED`/`I2C SDA`/`I2C SCL`/button). PWM:
-LEDC core 3.x on ESP32, `analogWrite` (25 kHz, range 255) on ESP8266 — both behind
-`pwm_setup()`/`pwm_write()` in `light.cpp` (§1.17).
+the board wiring (one set for all builds, Wemos D1 mini): PWM D8/GPIO 15, I2C SDA D2/GPIO 4, SCL
+D1/GPIO 5, button D4/GPIO 2 (`PIN_PWM_LED`/`PIN_I2C_SDA`/`PIN_I2C_SCL`/`PIN_BUTTON`). PWM: LEDC core
+3.x on ESP32, `analogWrite` (25 kHz, range 255) on ESP8266 — both behind `pwm_setup()`/`pwm_write()`
+in `light.cpp` (§1.17).
 
 **Light state:** `light_active()` = fade running (false once the lamp reaches 255);
 `light_isOn()` = on flag, true from `light_startFadeIn()` (including after the fade completes) until
@@ -713,8 +719,9 @@ perceived smoothness; web UI day-group rendering + snooze persistence after rebo
 clears RAM snooze/skip (expected); **new:** AHT10/AHT20 present at `0x38` and humidity in the UI,
 AHT/BME cross-talk on the shared bus, BME280 IIR ×16 smoothing vs response time, AHT cadence
 responsiveness (2 s), fallback when the AHT is unplugged at runtime. **ESP8266 additions:** build
-from `esp8266:esp8266 3.1.2`, PWM on GPIO 14 (D5) and the lowest steps of the curve, LittleFS
-`/config.cfg` mount on ESP8266, AP mode on ESP8266, I2C remap on GPIO 4/5, button on GPIO 13.
+from `esp8266:esp8266 3.1.2`, PWM on D8/GPIO 15 and the lowest steps of the curve, LittleFS
+`/config.cfg` mount on ESP8266, AP mode on ESP8266, I2C on GPIO 4/5 (D2/D1), button on D4/GPIO 2
+(strapping pin + onboard LED), boot with the button not pressed and D8 driven low.
 
 **Useful commands**
 

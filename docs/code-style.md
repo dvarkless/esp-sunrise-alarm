@@ -45,8 +45,9 @@ The Arduino sketch folder is flat (`LightScheduler/*.h/*.cpp` next to the `.ino`
 - `#pragma once` is the **first line** of every header (144/145 lib headers; the only old-style
   `#ifndef` guard is the legacy `GyverBME280.h` — do not imitate it).
 - `board.h` is the only platform-dispatch header: `config.h` includes it, it defines
-  `LS_BOARD_ESP8266` / `LS_BOARD_ESP32` and the per-board `PIN_*`, so every other module sees the same
-  pin names regardless of the chip family.
+  `LS_BOARD_ESP8266` / `LS_BOARD_ESP32` and the board-wiring `PIN_*` (one unconditional set — pins
+  are board wiring, not platform), so every other module sees the same pin names regardless of the
+  chip family.
 - **Include order.** In project `.cpp`: own header first, then project headers, blank line, then
   angle-bracket system/library headers (`sensors.cpp:1-9`, `webui.cpp:1-8`). In `.ino`:
   `<Arduino.h>` first, then project headers. Inside third-party-style modules (if ever written):
@@ -86,7 +87,7 @@ void light_stop();         // мгновенно погасить и остан�
 | Project module functions | `snake_case` with module prefix | `light_isOn()`, `sensors_date_key()`, `config_save()` |
 | Project module state | `static` in `.cpp`, camelCase, **no** underscore | `static bool fading`, `static uint32_t fadeStart` (`light.cpp:31-34`) |
 | Globals exported from a module | `extern` in `.h`, defined once in `.cpp` | `extern Config config;` / `Config config;` (`config.h:49`, `config.cpp:9`) |
-| Macros / compile-time config | `UPPER_SNAKE` | `PIN_PWM_LED`, `PWM_FREQ`, `FADE_STEP_MS` (`config.h:5-14`) |
+| Macros / compile-time config | `UPPER_SNAKE` | `PIN_PWM_LED`, `PWM_FREQ`, `FADE_STEP_MS` (`board.h`, `config.h`) |
 | File-scope constants/tables | `static const` + `UPPER_SNAKE` | `CURVE_LUT`, `WEEKDAY_NAMES`, `AHT_PERIOD_MS` (`light.cpp:10`, `sensors.cpp:30-35`) |
 | Event vs state | bare noun = one-shot event, `-ing` = current state | `press()` / `pressing()` (`EncButton/src/core/VirtButton.h:198-254`) |
 | Callback typedefs | `typedef void (*NameCallback)(args);` | `ChangeCallback`, `SecondCallback` (`GyverDB/src/GyverDB.h:19`, `Stamp/src/StampKeeper.h:14`) |
@@ -187,7 +188,7 @@ data members and struct fields have **no** underscore (`Stamp::unix`, `Config.da
   (`GyverDB/src/GyverDB.h:12-15`, `StringUtils/src/utils/Value.h:9-11`). Platform dispatch uses an
   `#if defined(__AVR__) … #elif defined(ESP8266) … #elif defined(ESP32) … #else` chain
   (`GyverIO/src/gio/gio.h:9-17`). The firmware uses exactly this chain in `board.h`, ESP8266 first:
-  it normalizes to `LS_BOARD_ESP8266` / `LS_BOARD_ESP32` and keeps the board-specific pins (`PIN_*`)
+  it normalizes to `LS_BOARD_ESP8266` / `LS_BOARD_ESP32` and keeps the board-wiring pins (`PIN_*`)
   there; `config.h` keeps timings/PWM constants as `#define`. Platform `#if` is allowed only in the
   four localized places — `board.h` (dispatch/pins), `light.cpp` PWM helpers
   (`pwm_setup()`/`pwm_write()`), the `webui.cpp` WiFi include, and the `config.cpp` LittleFS mount

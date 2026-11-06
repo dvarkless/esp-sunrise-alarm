@@ -33,7 +33,7 @@ LightScheduler/
 
 ## Плата
 
-Поддерживаются **ESP32** и **ESP8266**; платформа определяется выбранным ядром, различия скрыты в `board.h` (пины) и `light.cpp` (ШИМ).
+Плата проекта — **Wemos D1 mini (ESP8266)**; сборка поддерживает и **ESP32**, платформа определяется выбранным ядром. Пины заданы одним набором в `board.h` (разводка платы, не зависит от платформы); различия платформ скрыты только в ШИМ/Wi-Fi/ФС.
 
 1. `Tools → Board → Boards Manager` → установить **esp32 by Espressif Systems** и/или **esp8266 by ESP8266 Community**.
 2. Выбрать плату **ESP32 Dev Module** или **NodeMCU 1.0 / Wemos D1 mini**.
@@ -42,7 +42,7 @@ LightScheduler/
 
 ## Настройка
 
-- **Пины** — в `board.h` (`PIN_PWM_LED`, `PIN_I2C_SDA`, `PIN_I2C_SCL`, `PIN_BUTTON`); значения свои для ESP32 и ESP8266.
+- **Пины** — в `board.h`, один набор для всех сборок (Wemos D1 mini): `PIN_PWM_LED` = D8/GPIO 15, `PIN_I2C_SDA` = D2/GPIO 4, `PIN_I2C_SCL` = D1/GPIO 5, `PIN_BUTTON` = D4/GPIO 2 (`INPUT_PULLUP`). D4 и D8 — strapping-выводы ESP8266 (см. комментарии в `board.h`).
 - **Wi-Fi** — в `config.h` (`WIFI_SSID` / `WIFI_PASS`). Если SSID оставить пустым, устройство поднимет точку доступа `LightScheduler` (IP по умолчанию `192.168.4.1`).
 - **Часовой пояс** — `TIME_ZONE` в `config.h` (для Москвы `3`).
 - **Значения по умолчанию** — поля структуры `Config` в `config.h`: расписание по дням (`days[7]`, 0=Пн…6=Вс, по умолчанию все дни 07:30), `fadeDuration` (мин, по умолчанию 15), `turnOffDelay` (мин, по умолчанию 60), `snoozeMinutes`.
