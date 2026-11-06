@@ -14,7 +14,7 @@
 esp-sunrise-alarm/
 ├── .gitignore              // шаблон для C/C++ артефактов сборки (не Arduino-специфичный)
 ├── LICENSE                 // MIT, Copyright (c) 2026 Amir Suleymanov
-├── README.md               // заголовок и одна строка описания
+├── README.md               // публичное описание для пользователя: сборка, прошивка, веб-интерфейс
 ├── PROJECT.md              // этот файл
 ├── docs/
 │   ├── light-curve.md      // исследование кривой розжига: формула, LUT, обоснование
@@ -193,7 +193,7 @@ Wi-Fi: при заданном `WIFI_SSID` — режим STA с ожидани�
 
 ### `log` — [`log.h`](LightScheduler/log.h) / [`log.cpp`](LightScheduler/log.cpp)
 
-Единая точка логирования. `log_print` / `log_println` / `app_log_printf` пишут **одновременно** в `Serial` и в кольцевой буфер `sets::Logger logger(1024)`, который отдаётся в браузер виджетом `Log` (последний элемент страницы, `ID_LOG = 4`) через `upd.update(ID_LOG, logger)` — работает в режиме опроса без WebSocket. Все прежние `Serial.*`-вызовы в `.ino`, `sensors.cpp` и `webui.cpp` переведены на эти обёртки; `Serial.begin(115200)` остался. Префикс `app_` у `app_log_printf` — чтобы не конфликтовать с `int log_printf()` из ядра ESP32 (`esp32-hal-log.h`).
+Единая точка логирования. `log_print` / `log_println` / `app_log_printf` пишут **одновременно** в `Serial` и в кольцевой буфер `sets::Logger logger(1024)`, который отдаётся в браузер виджетом `Log` (последний элемент страницы, `ID_LOG = 6`) через `upd.update(ID_LOG, logger)` — работает в режиме опроса без WebSocket. Все прежние `Serial.*`-вызовы в `.ino`, `sensors.cpp` и `webui.cpp` переведены на эти обёртки; `Serial.begin(115200)` остался. Префикс `app_` у `app_log_printf` — чтобы не конфликтовать с `int log_printf()` из ядра ESP32 (`esp32-hal-log.h`).
 
 ---
 
@@ -286,9 +286,9 @@ Wi-Fi: при заданном `WIFI_SSID` — режим STA с ожидани�
 
 > **Требование к ядру ESP32:** прошивка использует LEDC API ядра 3.x — `ledcAttachChannel()` / `ledcWriteChannel()`. В core 3.0 legacy-вызовы `ledcSetup`/`ledcAttachPin`/`ledcWrite(channel, …)` удалены, поэтому нужно ядро **esp32 by Espressif Systems ≥ 3.0** (проверено на 3.3.0).
 >
-> **Требование к ядру ESP8266:** прошивка использует `analogWriteFreq`/`analogWriteRange`/`analogWrite` и `LittleFS` — доступны в ядре **esp8266 by ESP8266 Community 3.x** (проверено на 3.1.2). LEDC на ESP8266 нет; различия скрыты в `light.cpp` (`pwm_setup()`/`pwm_write()`), а пины зависят от платформы и объявлены в `board.h`.
+> **Требование к ядру ESP8266:** прошивка использует `analogWriteFreq`/`analogWriteRange`/`analogWrite` и `LittleFS` — доступны в ядре **esp8266 by ESP8266 Community 3.x** (проверено на 3.1.2). LEDC на ESP8266 нет; различия скрыты в `light.cpp` (`pwm_setup()`/`pwm_write()`), а пины — единая разводка платы (Wemos D1 mini) в `board.h`, без платформенных различий.
 
-Настройка под свою схему — константы и значения по умолчанию в [`config.h`](LightScheduler/config.h), **пины — в [`board.h`](LightScheduler/board.h)** (по платформам), Wi-Fi — `WIFI_SSID`/`WIFI_PASS`/`AP_NAME` в `config.h`.
+Настройка под свою схему — константы и значения по умолчанию в [`config.h`](LightScheduler/config.h), **пины — в [`board.h`](LightScheduler/board.h)** (один набор для обеих сборок), Wi-Fi — `WIFI_SSID`/`WIFI_PASS`/`AP_NAME` в `config.h`.
 
 > После первого запуска прошивки с форматом `'D'` старые настройки из `/config.cfg` сбрасываются на значения по умолчанию (все дни 07:30, расписание включено, `maxBrightness = 100`).
 
