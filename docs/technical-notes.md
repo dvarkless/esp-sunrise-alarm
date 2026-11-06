@@ -588,9 +588,10 @@ Fast regression check if another widget is added later.
 - History: `ed8c201` (user's baseline import) → `e97cec3` (three features + curve) → `2cf0285`
   (gated tap + technical notes) → `84c65d0` (`.gitignore`: `libs/`) → compile-fix + docs-sync
   release (2026-11-04: ESP32 core 3.x LEDC API, docs split) → AHT humidity + BME280 filtration
-  release (2026-11-04; see `git log`) → dual-platform ESP32/ESP8266 port (2026-11-06, current
-  working-tree change, not committed; builds verified for both targets, §1.17). All past pushes were
-  fast-forward; HEAD == origin/main after each release.
+  release (2026-11-04; see `git log`) → dual-platform ESP32/ESP8266 port (2026-11-06, commit
+  `ffdb340`, pushed to origin/main; builds verified for both targets, §1.17). All pushes were
+  fast-forward; HEAD == origin/main after each release. The local working tree keeps the user's
+  Wi-Fi credentials in `config.h` as an uncommitted change (the committed copy has empty strings).
 - Release mechanics (explicit-path staging, secret scan, push verification, GPG-signing sandbox
   workaround, unsigned-commit disclosure) and all agent-orchestration patterns now live in
   [`lead-hacks.md`](lead-hacks.md).
