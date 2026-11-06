@@ -54,6 +54,7 @@ void build(sets::Builder& b) {
     {
         sets::Group g(b, "Розжиг");
         b.Slider("Длительность (мин)", 0, 60, 1, "мин", &config.fadeDuration);
+        b.Slider("Максимальная яркость", 0, 100, 1, "%", &config.maxBrightness);
         if (b.Button("Запуск будильника")) {
             light_startFadeIn();
         }

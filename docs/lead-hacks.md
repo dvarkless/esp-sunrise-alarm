@@ -8,8 +8,10 @@ found along the way. This file is process-only — firmware engineering is in
 
 Current release state: `e97cec3` → `2cf0285` (gated tap + technical notes) → `84c65d0`
 (`.gitignore`: `libs/`) → compile-fix + docs-sync release (2026-11-04: ESP32 core 3.x LEDC API) →
-dual-platform ESP32/ESP8266 port (2026-11-06, commit `ffdb340`); HEAD == origin/main. The local
-working tree keeps the user's Wi-Fi credentials in `config.h` uncommitted (committed copy: empty).
+dual-platform ESP32/ESP8266 port (2026-11-06, commit `ffdb340`) → single Wemos-D1-mini pin map
+(`2d1937d`) → maxBrightness + phase-dependent button click (2026-11-06 feature release, see
+`git log`); HEAD == origin/main. The local working tree keeps the user's Wi-Fi credentials in
+`config.h` uncommitted (committed copy: empty).
 
 ---
 

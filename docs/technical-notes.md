@@ -30,14 +30,18 @@ struct DaySchedule {
 struct Config {
     bool        enabled       = true;   // master switch
     uint8_t     snoozeMinutes = 10;
+    uint8_t     maxBrightness = 100;    // % of the PWM range (0-100; 100 -> 255)
     DaySchedule days[7];                // [0]=Mon … [6]=Sun (ISO 8601)
     uint32_t    fadeDuration  = 15;     // minutes (0-60)
-    uint32_t    turnOffDelay  = 60;     // minutes (0-60), auto turn-off after the fade
+    uint32_t    turnOffDelay  = 60;     // minutes (0-120), auto turn-off after the fade
 };
 ```
 
-- `sizeof(DaySchedule) == 3`, `sizeof(Config) == 32` on xtensa-gcc (Xtensa ABI is 4-byte aligned;
-  one pad byte before `fadeDuration`).
+- `sizeof(DaySchedule) == 3`, `sizeof(Config) == 32` on xtensa-gcc (4-byte ABI). Format `'D'` layout:
+  `enabled@0, snoozeMinutes@1, maxBrightness@2, days@3 (21 B), fadeDuration@24, turnOffDelay@28`.
+  The new `maxBrightness` byte is absorbed by what used to be the pad byte before `fadeDuration`, so
+  the total size stays 32 while the raw payload layout changed — the version bump `'C' → 'D'`, not the
+  size check, is what rejects old files.
 - Index mapping is direct: `days[sensors_weekday() - 1]`, because `weekDay()` is already ISO
   (`1=Mon … 7=Sun`). No lookup table needed.
 - Two separate enable levels: `config.enabled` (master) and `days[i].enabled` (per day). Trigger
@@ -46,20 +50,24 @@ struct Config {
   produce the same safe state without any init code.
 
 **Hack / caution:** `SaverFile` serializes the struct as raw bytes — including padding. Do not
-casually reorder fields or change types: bump the Saver format version instead.
+casually reorder fields or change types: bump the Saver format version instead. A layout change can
+keep `sizeof(Config)` identical (`maxBrightness` filled the old pad byte), so never rely on Saver's
+size check alone.
 
 ### 1.2 Saver format migration without migration code
 
 ```cpp
-SaverFile saver(LittleFS, "/config.cfg", config, 'C', 10, FileStore::Atomic);
-//                                              ^^^ was 'B'
+SaverFile saver(LittleFS, "/config.cfg", config, 'D', 10, FileStore::Atomic);
+//                                              ^^^ 'C' before maxBrightness, 'B' originally
 ```
 
 - Saver's header stores `ver` **and** data size. `begin()` copies stored data only when both match;
   otherwise it treats current RAM (the defaults) as the new config and rewrites the file.
-- Bumping `'B' → 'C'` therefore gave a free, atomic, one-time settings reset after the struct change
-  (`fadeDuration` switched to minutes + `turnOffDelay` added).
-  No compatibility shim, no versioned parser.
+- Bumping `'B' → 'C'` (`fadeDuration` switched to minutes + `turnOffDelay` added) and later
+  `'C' → 'D'` (`maxBrightness` added) therefore gave a free, atomic, one-time settings reset after
+  each struct change. No compatibility shim, no versioned parser. Note that `'C'` and `'D'` payloads
+  are both 32 bytes — only the version field distinguishes them, so the bump is mandatory even when
+  the size does not change.
 - Trade-off accepted: user settings are lost once on upgrade. This is documented in
   [`PROJECT.md`](../PROJECT.md) and [`LightScheduler/README.md`](../LightScheduler/README.md).
 - Autosave is CRC-driven at `timeout/2` (~5 s), so `tick()` must be called every loop.
@@ -108,8 +116,8 @@ if (curMin != lastMinute) { lastMinute = curMin; alarmTriggered = false; }
 static bool     snoozePending = false;
 static uint32_t snoozeStartMs = 0;
 
-// tap (only when the light is on or fading — see §1.12):
-if (light_isOn()) {
+// tap while the fade is running (stop + snooze — see §1.12):
+if (light_isOn() && light_active()) {
     light_stop();
     snoozePending = false;
     snoozeStartMs = millis();
@@ -129,9 +137,9 @@ if (snoozePending) {
 
 - Unsigned subtraction is overflow-safe (`millis()` wraps ~49.7 days); range 1–60 min fits `uint32`.
 - `max(1, snoozeMinutes)` guard makes a malformed/legacy `0` harmless.
-- Repeated tap **while the light is on** restarts the countdown (simple and predictable), no
-  accumulation. Tap while the light is off is a no-op (§1.12): it cannot restart or extend a pending
-  snooze — wait it out, long-press to cancel/skip, or turn the light on from the web UI first.
+- Repeated tap **while the fade is running** restarts the countdown (simple and predictable), no
+  accumulation. Tap while the light is off is a no-op (§1.12), and a tap on a fully-on lamp (max
+  brightness) only turns it off — it neither starts nor extends a snooze (§1.12).
 - A tap before the scheduled event therefore creates no snooze and suppresses nothing: the schedule
   fires normally at its configured time.
 - Snooze is a **manual override**: fires regardless of `config.enabled` and per-day enable.
@@ -201,18 +209,34 @@ static_assert(sizeof(CURVE_LUT) == 256, "CURVE_LUT: ожидается 256 ба�
 uint32_t elapsed = now - fadeStart;
 uint32_t dur     = fading ? config.fadeDuration * 60 * 1000 : config.turnOffDelay * 60 * 1000;
 
-if (!dur || elapsed >= dur) { pwm_write(255); fading = false; return; }
+if (!dur || elapsed >= dur) { pwm_write(maxDuty()); fading = false; return; }
 
 uint16_t idx = (uint16_t)(elapsed * 255UL / dur);   // elapsed ≤ 3.6e6 => product < 918e6
-pwm_write(CURVE_LUT[idx]);
+pwm_write(scaleDuty(CURVE_LUT[idx]));
 ```
+
+**Max brightness scaling** (`config.maxBrightness`, 0–100 %, format `'D'`):
+
+```cpp
+static uint8_t brightnessPct() { return config.maxBrightness > 100 ? 100 : config.maxBrightness; }
+static uint8_t maxDuty()       { return (uint8_t)(((uint16_t)255 * brightnessPct() + 50) / 100); }
+static uint8_t scaleDuty(uint8_t duty) {
+    return (uint8_t)(((uint16_t)duty * brightnessPct() + 50) / 100);
+}
+```
+
+- 100 % reproduces the old exact values (verified 256/256: `scaleDuty(LUT[i]) == LUT[i]`), 50 % →
+  max duty 128 and `scaleDuty(77) = 39`, 0 % → 0 (the fade still runs but writes 0; `light_isOn()`
+  stays true until `light_stop()`/auto-off), >100 % clamps to 100 %.
+- Integer-only: max product `255*100 = 25500` fits `uint16_t`.
 
 Hacks / details worth remembering:
 - **Time-based progress**, not per-step accumulation: no float drift; a delayed loop tick just jumps
   to the correct duty.
 - `elapsed*255` fits `uint32` because the UI slider caps `fadeDuration` at 60 minutes (3.6e6 ms →
   product < 918e6). `idx ≤ 254` in
-  the curve branch; exact `255` is handled by the dedicated end branch.
+  the curve branch; the exact maximum (`maxDuty()`, 255 at 100 %) is handled by the dedicated end
+  branch.
 - On both ESP32 and ESP8266, `static const` arrays are placed in flash — no `PROGMEM`/`pgm_read_byte`
   needed (0 extra RAM).
 - `static_assert` makes a table-size regression a compile-time error.
@@ -282,19 +306,20 @@ static bool on     = false;   // light_isOn()
 
 void light_startFadeIn() { on = true;  fading = true; ... pwm_write(0); }
 void light_stop()        { on = false; fading = false; pwm_write(0); }
-// end of fade: pwm_write(255); fading = false;   // on stays true
+// end of fade: pwm_write(maxDuty()); fading = false;   // on stays true
 ```
 
 - `on` is set **before** the first PWM write in `light_startFadeIn()`, so the first tap after a
   scheduled start already counts as "light is on".
-- Fade completion only clears `fading`; the lamp stays at 255 and `on` remains true until
-  `light_stop()`.
+- Fade completion only clears `fading`; the lamp stays at `maxDuty()` (255 at maxBrightness=100 %)
+  and `on` remains true until `light_stop()`.
 - `light_stop()` is the single place that clears `on`, so every stop path (tap-snooze, long press,
   web/off) leaves consistent state.
-- The .ino tap handler gates on `light_isOn()`, not `light_active()`: a tap must also postpone a lamp
-  that is already fully on, and a tap in the dark must do nothing.
-- Product rule (2026-11-02): tap is a no-op unless the light is fading or fully on; before the
-  scheduled event there is nothing to postpone, so the schedule later fires as usual.
+- The .ino tap handler gates on `light_isOn()`, then splits by `light_active()`: fade running →
+  stop + snooze; fully on (max-brightness phase) → stop only, no new snooze, and any pending
+  countdown is cancelled so the lamp cannot re-light; tap in the dark → no-op.
+- Product rules: (2026-11-02) a tap is a no-op unless the light is fading or fully on; (2026-11-06)
+  a tap on the fully-on lamp just turns it off — it no longer re-arms a snooze.
 
 ### 1.13 Local Gyver library checkout (`libs/`)
 
@@ -489,7 +514,7 @@ and `getLocalTime(tm*, uint32_t)` exist on both; `LittleFS.h` exists in ESP8266 
 (or `*`). The build gate is both commands in §5.
 
 **Verified builds (2026-11-06):** both targets PASS, 0 project warnings — ESP32 flash 85 %, RAM 15 %;
-ESP8266 flash (IROM) 36 %, RAM 39 %, **IRAM 95 % (≈2.8 KB slack)**. So the ESP8266 bound is IRAM, not
+ESP8266 flash (IROM) 36 %, RAM 39 %, **IRAM 95 % (≈2.7 KB slack)**. So the ESP8266 bound is IRAM, not
 flash/RAM: any future `IRAM_ATTR`/interrupt-heavy code must be checked with the build.
 
 **Risks / not verified:** no hardware run on ESP8266 yet (PWM at 25 kHz and its low-end linearity,
@@ -557,7 +582,8 @@ A Python port of `loop()` (1-second ticks, exact `millis()` snooze math, injecte
 events) ran the scheduler matrix and, after the tap-policy change (§1.12), the gated-tap matrix:
 tap idle (light off) → no-op, schedule fires at 07:30; tap 07:29 (off) → no-op, 07:30 fires; tap
 during the scheduled fade → light off + snooze; tap at 07:31 with the lamp fully on → light off +
-snooze; second tap while light off (snooze pending) → no-op; tap after the snooze fired (lamp on) →
+snooze *(matrix from the 2026-11-02 policy; since 2026-11-06 a fully-on tap only turns the lamp off —
+see §1.12)*; second tap while light off (snooze pending) → no-op; tap after the snooze fired (lamp on) →
 new snooze; hold during fade/snooze → skip today + next-day re-arm; master off + tap with light off
 → no-op. All pass. The 1-second port plus real `millis()` deadline semantics is enough to catch
 ordering bugs (e.g. a snooze deadline landing exactly on a scheduled minute, §1.6) that a hand-check
@@ -594,9 +620,11 @@ Fast regression check if another widget is added later.
   (gated tap + technical notes) → `84c65d0` (`.gitignore`: `libs/`) → compile-fix + docs-sync
   release (2026-11-04: ESP32 core 3.x LEDC API, docs split) → AHT humidity + BME280 filtration
   release (2026-11-04; see `git log`) → dual-platform ESP32/ESP8266 port (2026-11-06, commit
-  `ffdb340`, pushed to origin/main; builds verified for both targets, §1.17). All pushes were
-  fast-forward; HEAD == origin/main after each release. The local working tree keeps the user's
-  Wi-Fi credentials in `config.h` as an uncommitted change (the committed copy has empty strings).
+  `ffdb340`, pushed to origin/main; builds verified for both targets, §1.17) → single Wemos-D1-mini
+  pin map (`2d1937d`) → maxBrightness slider + phase-dependent button click, Saver `'D'`
+  (2026-11-06 feature release; see `git log`). All pushes were fast-forward; HEAD == origin/main
+  after each release. The local working tree keeps the user's Wi-Fi credentials in `config.h` as an
+  uncommitted change (the committed copy has empty strings).
 - Release mechanics (explicit-path staging, secret scan, push verification, GPG-signing sandbox
   workaround, unsigned-commit disclosure) and all agent-orchestration patterns now live in
   [`lead-hacks.md`](lead-hacks.md).
@@ -633,6 +661,10 @@ Fast regression check if another widget is added later.
   feature modules.
 - ESP8266 I/O: avoid strapping/UART/flash pins (0/2/12/15/16, 1/3, 6–11); GPIO 16 has no PWM; the
   `IPAddress` there is `Printable` too, so logging code is shared.
+- A `Config` layout change can keep `sizeof(Config)` the same (`maxBrightness` filled the old pad
+  byte) → always bump the Saver version letter; never rely on the size check alone.
+- Button behaviour is phase-dependent: gate on `light_isOn()` first, then `light_active()` — fade
+  running → stop + snooze; fully on → off only (cancel any pending snooze).
 - AHT10/AHT20: `Adafruit_AHTX0::getEvent()` busy-waits ≈80 ms (`while(busy) delay(10)`), so it must
   not be called from `loop()` — use the raw-Wire trigger→poll→read machine (§1.15).
 - BME280 IIR: `setFilter()` must come **before** `begin()` — the coefficient is written to register
@@ -649,9 +681,9 @@ Fast regression check if another widget is added later.
 
 ## 5. Quick reference
 
-**Config (32 bytes):** master `enabled`, `snoozeMinutes` (1–60, default 10), `days[7]`
-(`0=Mon … 6=Sun`, each hour/minute/enabled, default 07:30/on), `fadeDuration` (0–60 min, default 15),
-`turnOffDelay` (0–60 min, default 60).
+**Config (32 bytes):** master `enabled`, `snoozeMinutes` (1–60, default 10), `maxBrightness` (0–100 %,
+default 100 → PWM 255), `days[7]` (`0=Mon … 6=Sun`, each hour/minute/enabled, default 07:30/on),
+`fadeDuration` (0–60 min, default 15), `turnOffDelay` (0–120 min, default 60). Format letter `'D'`.
 
 **Curve:** `d(p)=p^1.7369656`; `LUT[128]=77` → ≈30.2 % duty at 50 % progress; `LUT[0]=0`,
 `LUT[255]=255`; first nonzero `LUT[8]`.
@@ -662,7 +694,8 @@ D1/GPIO 5, button D4/GPIO 2 (`PIN_PWM_LED`/`PIN_I2C_SDA`/`PIN_I2C_SCL`/`PIN_BUTT
 3.x on ESP32, `analogWrite` (25 kHz, range 255) on ESP8266 — both behind `pwm_setup()`/`pwm_write()`
 in `light.cpp` (§1.17).
 
-**Light state:** `light_active()` = fade running (false once the lamp reaches 255);
+**Light state:** `light_active()` = fade running (false once the lamp reaches its configured
+maximum, `maxDuty()` — 255 at 100 %);
 `light_isOn()` = on flag, true from `light_startFadeIn()` (including after the fade completes) until
 `light_stop()`. The tap handler postpones only when `light_isOn()` is true.
 
@@ -678,7 +711,8 @@ hour == day.hour && minute == day.minute
 
 | Input | Effect |
 |---|---|
-| tap, light on/fading | light off, previous snooze cancelled, fade in `snoozeMinutes` later; does not cancel today's scheduled event |
+| tap during fade | light off, previous snooze cancelled, fade in `snoozeMinutes` later; does not cancel today's scheduled event |
+| tap at full brightness (max-brightness phase) | light off only; no snooze started, pending countdown cancelled; schedule untouched |
 | tap, light off | no-op: no stop, no snooze start/restart; log line only; the schedule fires normally later |
 | tap while a snooze is pending (light off) | no-op (cannot restart/extend the countdown) |
 | hold ≥ 2 s | light off, snooze cancelled, skip today only (auto re-arm tomorrow) |
@@ -705,20 +739,23 @@ Adafruit BusIO + Adafruit Unified Sensor 1.1.15 (not part of `libs/`).
 
 **Build (real toolchain, `arduino-cli 1.5.1`):** two targets, both verified in §1.17:
 - ESP32 (`esp32:esp32 3.3.0`): `arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/` → exit 0;
-  flash 1 116 263 / 1 310 720 B (85 %), RAM 49 384 / 327 680 B (15 %), 0 project warnings.
+  flash 1 116 575 / 1 310 720 B (85 %), RAM 49 384 / 327 680 B (15 %), 0 project warnings.
 - ESP8266 (`esp8266:esp8266 3.1.2`): `arduino-cli compile --fqbn esp8266:esp8266:nodemcuv2 LightScheduler/`
-  → exit 0; flash (IROM) 385 060 / 1 048 576 B (36 %), RAM 31 656 / 80 192 B (39 %),
-  **IRAM 62 739 / 65 536 B (95 % — only ≈2.8 KB slack**, the tight constraint for future ESP8266 work),
+  → exit 0; flash (IROM) 385 320 / 1 048 576 B (36 %), RAM 31 700 / 80 192 B (39 %),
+  **IRAM 62 739 / 65 536 B (95 % — only ≈2.7 KB slack**, the tight constraint for future ESP8266 work),
   0 project warnings (only 2 `SyntaxWarning`s from the ESP8266 core's own `elf2bin.py`, not our code).
 Requires ESP32 core ≥ 3.0 / ESP8266 core 3.x and the Adafruit AHTX0/BusIO/Unified Sensor libraries;
 only the `compile-checker` agent runs `arduino-cli` (§1.14).
 
-**Hardware checklist (still pending — build verified, device not):** Saver `'C'` migration from an old `/config.cfg`;
+**Hardware checklist (still pending — build verified, device not):** Saver `'D'` migration from an old `/config.cfg`;
 DS3231 weekday/date mapping; 2 s hold boundary + debounce; tap-vs-hold feel; LED curve low-end and
 perceived smoothness; web UI day-group rendering + snooze persistence after reboot; power-cycle
 clears RAM snooze/skip (expected); **new:** AHT10/AHT20 present at `0x38` and humidity in the UI,
 AHT/BME cross-talk on the shared bus, BME280 IIR ×16 smoothing vs response time, AHT cadence
-responsiveness (2 s), fallback when the AHT is unplugged at runtime. **ESP8266 additions:** build
+responsiveness (2 s), fallback when the AHT is unplugged at runtime; **new features (2026-11-06):**
+`maxBrightness` slider at 0/50/100 % (PWM duty scales to 0/128/255, full-on duty follows), button
+click at full brightness turns off without a new snooze and cancels a pending one, fade-phase click
+still stops + snoozes, Saver `'D'` migration from an old `/config.cfg`. **ESP8266 additions:** build
 from `esp8266:esp8266 3.1.2`, PWM on D8/GPIO 15 and the lowest steps of the curve, LittleFS
 `/config.cfg` mount on ESP8266, AP mode on ESP8266, I2C on GPIO 4/5 (D2/D1), button on D4/GPIO 2
 (strapping pin + onboard LED), boot with the button not pressed and D8 driven low.

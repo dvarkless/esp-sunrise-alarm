@@ -33,9 +33,11 @@ static bool     on        = false;  // свет включён: true от light_
 static uint32_t fadeStart = 0;      // millis() начала розжига
 static uint32_t lastStep  = 0;      // millis() последнего шага ШИМ
 
-// Платформенный слой ШИМ: реализация и объяснение веток — в конце файла
+// Платформенный слой ШИМ и масштабирование яркости: реализация — в конце файла
 static void pwm_setup();
 static void pwm_write(uint8_t duty);
+static uint8_t maxDuty();
+static uint8_t scaleDuty(uint8_t duty);
 
 void light_setup() {
     pwm_setup();
@@ -72,16 +74,17 @@ void light_update() {
     uint32_t dur = fading ? config.fadeDuration * 60 * 1000 : config.turnOffDelay * 60 * 1000;
 
     // dur до 3 600 000 мс (60 мин) и elapsed < dur => elapsed*255 < ~918 млн (умещается
-    // в uint32), idx <= 254; 255 выставляется отдельной веткой выше. Накопления нет — дрейфа нет.
+    // в uint32), idx <= 254; полный уровень (maxDuty) выставляется отдельной веткой выше.
+    // Накопления нет — дрейфа нет.
     if (fading) {
         if (!dur || elapsed >= dur) {
-            pwm_write(255);
+            pwm_write(maxDuty());
             fading = false;
             fadeStart = millis();
             return;
         }
         uint16_t idx = (uint16_t)(elapsed * 255UL / dur);
-        pwm_write(CURVE_LUT[idx]);  // при PWM_RES = 8 допустим диапазон 0..255
+        pwm_write(scaleDuty(CURVE_LUT[idx]));  // кривая, сжатая до максимума яркости
     }
     else {
         if (!dur || elapsed >= dur) {
@@ -111,4 +114,22 @@ static void pwm_write(uint8_t duty) {
 #else
     analogWrite(PIN_PWM_LED, duty);  // скважность 0..255
 #endif
+}
+
+// ===================== Яркость: config.maxBrightness (0..100 %) =====================
+// Ограничение яркости: защита от некорректного значения в сохранённом конфиге.
+static uint8_t brightnessPct() {
+    return config.maxBrightness > 100 ? 100 : config.maxBrightness;
+}
+
+// Максимальная скважность (0..255) при текущей яркости: (255*pct + 50)/100.
+// 100 % -> 255 (как раньше), 50 % -> 128 (округление half-up), 0 % -> 0.
+static uint8_t maxDuty() {
+    return (uint8_t)(((uint16_t)255 * brightnessPct() + 50) / 100);
+}
+
+// Пересчёт скважности кривой (0..255) в проценты максимальной яркости с округлением.
+// Произведение <= 255*100 = 25500 умещается в uint16_t; только целые (без плавающей точки).
+static uint8_t scaleDuty(uint8_t duty) {
+    return (uint8_t)(((uint16_t)duty * brightnessPct() + 50) / 100);
 }
