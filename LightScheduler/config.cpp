@@ -20,8 +20,14 @@ Config config;
 SaverFile saver(LittleFS, "/config.cfg", config, 'C', 10, FileStore::Atomic);
 
 void config_setup() {
+#ifdef LS_BOARD_ESP32
     // true = отформатировать LittleFS при первом запуске, если ФС отсутствует
     LittleFS.begin(true);
+#else
+    // ESP8266: у FS::begin() нет аргумента formatOnFail — автоформат при сбое
+    // монтирования включён в LittleFSConfig по умолчанию (autoFormat = true).
+    LittleFS.begin();
+#endif
     saver.begin();
 }
 

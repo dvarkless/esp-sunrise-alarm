@@ -35,11 +35,13 @@ were owned by the Lead, not by the implementer.
 The workspace originally had no Arduino core/libraries, no `arduino-cli`/PlatformIO and no device, so
 all verification was static:
 
-Since 2026-11-04 a real toolchain is available (`arduino-cli 1.5.1`, core `esp32:esp32 3.3.0`, Gyver
-libraries installed). The **`compile-checker`** teammate is the only agent allowed to run
-`arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/`, and only when necessary — after a code
-change to verify or when the Lead explicitly asks; no flag experiments and no duplicate builds. It
-fixes compile errors and reports pass/fail + compiler errors only. All git commands and code diffs
+Since 2026-11-04 a real toolchain is available (`arduino-cli 1.5.1`, cores `esp32:esp32 3.3.0` and
+`esp8266:esp8266 3.1.2`, Gyver libraries installed). The **`compile-checker`** teammate is the only
+agent allowed to run builds, and only when necessary — after a code change to verify or when the Lead
+explicitly asks; no flag experiments and no duplicate builds. Both targets must pass:
+`arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/` and
+`arduino-cli compile --fqbn esp8266:esp8266:nodemcuv2 LightScheduler/`. It fixes compile errors and
+reports pass/fail + compiler errors only. All git commands and code diffs
 belong to the **`git-release`** agent; docs stay with the Lead. Static checks below remain useful for
 semantics and behavior, which a compile cannot verify.
 
@@ -51,7 +53,8 @@ semantics and behavior, which a compile cannot verify.
   real sources; the `.ino` is compiled with `-x c++`. Stubs are created and used in the
   **same** bash call (each call gets a fresh `/tmp`).
 - **Host-side unit tests** — compiled the real `light.cpp`/`config.h` against stub
-  `millis()`/`ledc*` to check fade semantics and `light_isOn()`/`light_active()` transitions.
+  `millis()`/`pwm_setup()`/`pwm_write(...)` to check fade semantics and `light_isOn()`/
+  `light_active()` transitions.
 - **Behavioral simulation** — a Python model of `loop()` (1 s ticks, real `millis()` deadline
   math, injected tap/hold/web/master events) runs the schedule, snooze, skip and gated-tap
   scenario matrices.
@@ -70,6 +73,9 @@ semantics and behavior, which a compile cannot verify.
   No hardware available → hardware-only checks are explicitly flagged as pending.
 - Small diffs, no dead code, no unrelated refactors; Russian comments and web-UI labels;
   keep `loop()` non-blocking (no `delay()`/blocking waits in loop or handlers).
+- Platform differences live only in `board.h` (dispatch/pins), `light.cpp`
+  (`pwm_setup()`/`pwm_write()`), the `webui.cpp` WiFi include and the `config.cpp` LittleFS mount
+  (the two cores' `FS::begin()` signatures differ); keep both ESP32 and ESP8266 targets building.
 
 ## 5. Report template
 

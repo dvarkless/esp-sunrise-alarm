@@ -1,8 +1,8 @@
 # Code style — writing firmware code that matches this repository
 
 Purpose: a compact, evidence-backed style guide for any agent or developer who edits the firmware.
-Follow it unless a task explicitly says otherwise. The project is a small ESP32 Arduino sketch built
-on **GyverLibs** (vendored read-only in git-ignored [`libs/`](../libs/README.md)); firmware code
+Follow it unless a task explicitly says otherwise. The project is a small ESP32/ESP8266 Arduino
+sketch built on **GyverLibs** (vendored read-only in git-ignored [`libs/`](../libs/README.md)); firmware code
 should look and think like the libraries it uses. Architecture and feature facts live in
 [`PROJECT.md`](../PROJECT.md); engineering techniques in [`technical-notes.md`](technical-notes.md);
 process/delegation in [`workflow.md`](workflow.md) and [`lead-hacks.md`](lead-hacks.md).
@@ -27,8 +27,9 @@ stated otherwise. Path shorthand in this file: `<Lib>/src/...` means `libs/<Lib>
 - **Read-only dependencies:** `libs/` is a git-ignored upstream checkout — never edit, "fix" or
   reformat it. If an API behaves unexpectedly, adapt the caller.
 - **No tests/tooling** unless the user asks; build verification is only through the `compile-checker`
-  role (`arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/`), git only through
-  `git-release`. Do not add CI, pytest, PlatformIO, CMake, scripts or package managers.
+  role — both targets must pass, ESP32 `arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/`
+  and ESP8266 `--fqbn esp8266:esp8266:nodemcuv2` — git only through `git-release`. Do not add CI,
+  pytest, PlatformIO, CMake, scripts or package managers.
 - **No secrets in tracked files:** `WIFI_SSID`/`WIFI_PASS` may be filled locally in the working tree,
   never in a diff/commit/docs; secret-scan diffs for `PASSWORD|TOKEN|API_KEY|PRIVATE KEY|WIFI_PASS`.
 - **Keep docs in sync** with behavior changes (`PROJECT.md` + `LightScheduler/README.md` + relevant
@@ -43,6 +44,9 @@ The Arduino sketch folder is flat (`LightScheduler/*.h/*.cpp` next to the `.ino`
   `log.*` (Serial + web log). The `.ino` holds `setup()`, `loop()` and only top-level loop state.
 - `#pragma once` is the **first line** of every header (144/145 lib headers; the only old-style
   `#ifndef` guard is the legacy `GyverBME280.h` — do not imitate it).
+- `board.h` is the only platform-dispatch header: `config.h` includes it, it defines
+  `LS_BOARD_ESP8266` / `LS_BOARD_ESP32` and the per-board `PIN_*`, so every other module sees the same
+  pin names regardless of the chip family.
 - **Include order.** In project `.cpp`: own header first, then project headers, blank line, then
   angle-bracket system/library headers (`sensors.cpp:1-9`, `webui.cpp:1-8`). In `.ino`:
   `<Arduino.h>` first, then project headers. Inside third-party-style modules (if ever written):
@@ -64,9 +68,9 @@ The Arduino sketch folder is flat (`LightScheduler/*.h/*.cpp` next to the `.ino`
 #pragma once
 #include <Arduino.h>
 
-// ===================== Свет: плавный розжиг через LEDC (PWM) =====================
+// ===================== Свет: плавный розжиг через ШИМ (LEDC/analogWrite) ===============
 // Кривая розжига перцептуальная: d = p^1.7369656 (50 % прогресса → 30 % скважности).
-void light_setup();        // ledcAttachChannel, свет выключен
+void light_setup();        // pwm_setup() (LEDC на ESP32, analogWrite на ESP8266), свет выключен
 void light_startFadeIn();  // запустить плавный розжиг с нуля до максимума
 void light_stop();         // мгновенно погасить и остановить розжиг
 ```
@@ -138,7 +142,7 @@ data members and struct fields have **no** underscore (`Stamp::unix`, `Config.da
   short purpose block instead:
   ```cpp
   // ============================================================================
-  // Smart Scheduled Light Controller (ESP32)
+  // Smart Scheduled Light Controller (ESP32 / ESP8266)
   // Главный файл: setup() и неблокирующий loop().
   // ============================================================================
   ```
@@ -182,8 +186,13 @@ data members and struct fields have **no** underscore (`Stamp::unix`, `Config.da
   `#ifndef X / #define X default / #endif` blocks immediately above first use
   (`GyverDB/src/GyverDB.h:12-15`, `StringUtils/src/utils/Value.h:9-11`). Platform dispatch uses an
   `#if defined(__AVR__) … #elif defined(ESP8266) … #elif defined(ESP32) … #else` chain
-  (`GyverIO/src/gio/gio.h:9-17`). Firmware needs none of this: ESP32-only, pins/timings in
-  `config.h` as `#define`.
+  (`GyverIO/src/gio/gio.h:9-17`). The firmware uses exactly this chain in `board.h`, ESP8266 first:
+  it normalizes to `LS_BOARD_ESP8266` / `LS_BOARD_ESP32` and keeps the board-specific pins (`PIN_*`)
+  there; `config.h` keeps timings/PWM constants as `#define`. Platform `#if` is allowed only in the
+  four localized places — `board.h` (dispatch/pins), `light.cpp` PWM helpers
+  (`pwm_setup()`/`pwm_write()`), the `webui.cpp` WiFi include, and the `config.cpp` LittleFS mount
+  (`FS::begin()` signature differs) — feature logic always uses `LS_BOARD_*`/`PIN_*` and stays
+  platform-agnostic.
 - C-style casts dominate in the libs and in firmware (`(uint32_t)`, `(unsigned)`); `static_cast` is
   rare. Use C-style casts for register/byte work, and explicit casts for varargs (`%u` → `(unsigned)`,
   `%lu` → `(unsigned long)`, `technical-notes.md:267-268`).
@@ -294,6 +303,9 @@ static float temp = 0.0f;  // кэш последнего измерения
 - Do not edit `libs/`; do not vendor lib code into git; do not "modernize" module public APIs.
 - Do not introduce classes/singletons for firmware modules, dynamic allocation, `delay()` in
   `loop()`, blocking `while` waits in handlers, or float math in the fade path.
+- Do not add ESP32/ESP8266 `#if` branches outside the four localized places (`board.h`, the
+  `light.cpp` PWM helpers, the `webui.cpp` WiFi include, the `config.cpp` LittleFS mount); do not move
+  board-specific pins back into `config.h`.
 - Do not switch to Allman braces, tabs, 2-space indent (legacy BME280 examples), camelCase free
   functions, English user-facing strings, or `Serial.*` calls in modules.
 - Do not use STL containers/`std::string`/exceptions/RTTI/smart pointers in firmware; do not add
@@ -320,6 +332,7 @@ static float temp = 0.0f;  // кэш последнего измерения
 | String views, `Text`, compile-time hashing `SH()`, umbrella re-exports | `libs/StringUtils/src/StringUtils.h`, `utils/Text.h`, `utils/hash.h` |
 | Proxy access via `operator[]`, `namespace gdb`/`tbl` | `libs/GyverDB/src/GyverDB.h`, `libs/Table/src/Table.h` |
 | Streaming/chunked parsing, no full-payload buffering | `libs/GyverHTTP/src/StreamReader.h`, `StreamWriter.h`, `libs/StreamIO/src` |
+| Platform dispatch, pins, PWM differences | `LightScheduler/board.h`, `light.cpp` helpers, `docs/technical-notes.md` §1.17 |
 | Project architecture and feature behavior | `PROJECT.md`, `docs/technical-notes.md` |
 | Firmware build/verification rules and agent ownership | `docs/workflow.md`, `docs/lead-hacks.md` |
 
@@ -343,3 +356,6 @@ BSON 3.0.1, Stamp 1.5.1, Table 1.3.6, StreamIO 1.0.5, GyverIO 1.4.2).
 10. Docs updated (`PROJECT.md`, module README section, `docs/*.md`); no stale names/labels.
 11. No secrets/artifacts staged; build verified only via `compile-checker` if needed; report files,
     decisions, evidence, risks.
+12. Dual-platform check: platform `#if` only in `board.h`, the `light.cpp` PWM helpers, the
+    `webui.cpp` WiFi include and the `config.cpp` LittleFS mount; both ESP32 and ESP8266 builds pass;
+    board pins live in `board.h`, not `config.h`.

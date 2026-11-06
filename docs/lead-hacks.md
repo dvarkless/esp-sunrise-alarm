@@ -7,8 +7,8 @@ found along the way. This file is process-only — firmware engineering is in
 [`workflow.md`](workflow.md), and the project facts are in [`PROJECT.md`](../PROJECT.md).
 
 Current release state: `e97cec3` → `2cf0285` (gated tap + technical notes) → `84c65d0`
-(`.gitignore`: `libs/`) → compile-fix + docs-sync release (2026-11-04: ESP32 core 3.x LEDC API);
-HEAD == origin/main.
+(`.gitignore`: `libs/`) → compile-fix + docs-sync release (2026-11-04: ESP32 core 3.x LEDC API) →
+dual-platform ESP32/ESP8266 port (2026-11-06, working tree, not committed); HEAD == origin/main.
 
 ---
 
@@ -132,13 +132,14 @@ locks; the Lead assigns ordering.
 
 (Details and snippets in [`technical-notes.md`](technical-notes.md) §2.)
 
-- **Real build first (since 2026-11-04):** the workspace now has `arduino-cli 1.5.1`, core
-  `esp32:esp32 3.3.0` and the Gyver libraries installed, so the firmware is compiled for real:
-  `arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/`. This immediately caught an ESP32
-  core 3.x API removal (`ledcSetup`/`ledcAttachPin`) that the stub compile could never catch — stubs
-  are whatever we wrote. **Only the `compile-checker` teammate runs `arduino-cli`; the Lead and every
+- **Real build first (since 2026-11-04):** the workspace now has `arduino-cli 1.5.1`, cores
+  `esp32:esp32 3.3.0` and `esp8266:esp8266 3.1.2`, and the Gyver libraries installed, so the firmware
+  is compiled for real: `arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/` and, since the
+  dual-platform port, `--fqbn esp8266:esp8266:nodemcuv2`. This immediately caught an ESP32 core 3.x
+  API removal (`ledcSetup`/`ledcAttachPin`) that the stub compile could never catch — stubs are
+  whatever we wrote. **Only the `compile-checker` teammate runs `arduino-cli`; the Lead and every
   other agent must not.** Builds happen only when necessary (a code change to verify or an explicit
-  Lead request) and only with the exact command — no flag experiments, no duplicate builds.
+  Lead request) and only with the exact commands — no flag experiments, no duplicate builds.
   `compile-checker` reports pass/fail + compiler errors only; **all git commands and code diffs belong
   to `git-release`**, docs stay with the Lead.
 - **Sandbox cache workaround:** if an agent sandbox mounts `~/.cache` read-only, `arduino-cli` fails on
@@ -273,8 +274,8 @@ explicit `git add <paths>` → commit (GPG workaround if needed) → `git push o
 `HEAD == origin/main == ls-remote` → report hash + unsigned status.
 
 **Every build check:** request `compile-checker` (sole `arduino-cli` owner) only when necessary (code
-changed or the Lead asks) → it runs one exact-command build, fixes errors, reports pass/fail + errors
-(no diff). Request `git-release` for the code diff and git state. Never run `arduino-cli` outside
+changed or the Lead asks) → it runs the exact per-target builds (ESP32 and ESP8266), fixes errors,
+reports pass/fail + errors (no diff). Request `git-release` for the code diff and git state. Never run `arduino-cli` outside
 `compile-checker`, and never run git outside `git-release`.
 
 **Every phase:** claim task → read files → minimal diff → agent self-verifies → Lead re-verifies or

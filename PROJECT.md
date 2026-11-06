@@ -1,6 +1,6 @@
-# Smart Scheduled Light Controller (ESP32)
+# Smart Scheduled Light Controller (ESP32 / ESP8266)
 
-Проект **esp-sunrise-alarm**: устройство на ESP32, которое плавно включает свет в заданное время **по каждому дню недели** (часы DS3231), показывает температуру и давление с BME280 и влажность с AHT10/AHT20 (запасной источник — BME280) в веб-интерфейсе и управляется физической кнопкой: клик по разгорающемуся/включённому свету — отложить розжиг на N минут (клик при выключенном свете игнорируется), удержание ≥ 2 с — пропустить сегодняшний розжиг. Скважность ШИМ растёт по перцептуальной (логарифмической по восприятию) кривой.
+Проект **esp-sunrise-alarm**: устройство на ESP32 или ESP8266 (платформа выбирается при сборке, различия скрыты в `board.h`), которое плавно включает свет в заданное время **по каждому дню недели** (часы DS3231), показывает температуру и давление с BME280 и влажность с AHT10/AHT20 (запасной источник — BME280) в веб-интерфейсе и управляется физической кнопкой: клик по разгорающемуся/включённому свету — отложить розжиг на N минут (клик при выключенном свете игнорируется), удержание ≥ 2 с — пропустить сегодняшний розжиг. Скважность ШИМ растёт по перцептуальной (логарифмической по восприятию) кривой.
 
 Документ описывает **фактическое** состояние репозитория: структуру файлов, модули прошивки, пины, библиотеки и поведение кода.
 
@@ -24,7 +24,8 @@ esp-sunrise-alarm/
 │   └── code-style.md       // стиль кода: конвенции GyverLibs, модули, форматирование
 └── LightScheduler/         // прошивка (скетч + модули)
     ├── LightScheduler.ino  // setup() + неблокирующий loop(), расписание и состояние кнопки
-    ├── config.h            // пины, PWM, I2C, WiFi, struct Config, прототипы
+    ├── board.h             // платформенный слой: выбор платы (LS_BOARD_*), пины, различия ШИМ/WiFi
+    ├── config.h            // PWM, I2C, WiFi, struct Config, прототипы (пины — в board.h)
     ├── config.cpp          // глобальный config + Saver поверх LittleFS
     ├── sensors.h           // API датчиков и RTC
     ├── sensors.cpp         // Wire, BME280 + AHT10/20, DS3231, кэш измерений, день недели/дата
@@ -39,7 +40,7 @@ esp-sunrise-alarm/
     └── README.md           // краткая инструкция по библиотекам и запуску
 ```
 
-Особенности, которых в репозитории **нет**: `platformio.ini`, CMake, CI, тестов, скриптов сборки, файлов LittleFS-образа. Сборка — через Arduino IDE или `arduino-cli` по скетчу `LightScheduler.ino` (проверено на `arduino-cli 1.5.1` и ядре `esp32:esp32 3.3.0`).
+Особенности, которых в репозитории **нет**: `platformio.ini`, CMake, CI, тестов, скриптов сборки, файлов LittleFS-образа. Сборка — через Arduino IDE или `arduino-cli` по скетчу `LightScheduler.ino`; поддерживаются две платформы — ESP32 (ядро `esp32:esp32 3.3.0`) и ESP8266 (ядро `esp8266:esp8266 3.1.2`), проверено на `arduino-cli 1.5.1`.
 
 Локально, но не в git, может лежать `TASKS.md` — снапшот борды задач для офлайн-справки; он перечислен в `.gitignore` и не коммитится.
 
@@ -49,7 +50,7 @@ esp-sunrise-alarm/
 
 | Компонент | Назначение |
 |---|---|
-| ESP32 Dev Board | Основной контроллер |
+| ESP32 Dev Board или ESP8266 (NodeMCU / Wemos D1 mini) | Основной контроллер; платформа выбирается при сборке |
 | PWM LED-контроллер (MOSFET/драйвер) | Управление яркостью ленты/лампы |
 | BME280 | Температура и давление (IIR-фильтр x16, см. модуль `sensors`) |
 | AHT10 / AHT20 | Влажность (общая шина I2C, адрес `0x38`, альтернативный `0x39`) |
@@ -57,24 +58,26 @@ esp-sunrise-alarm/
 | Тактовая кнопка | Ручное управление: клик по включённому свету — отложить, удержание — пропустить день |
 | Блок питания 3.3V / 5V | Питание платы и периферии |
 
-### Пины (из [`config.h`](LightScheduler/config.h))
+### Пины (из [`board.h`](LightScheduler/board.h))
 
-| Определение | Значение | Подключение |
-|---|---|---|
-| `PIN_PWM_LED` | GPIO 5 | Вход MOSFET/драйвера, общий GND с ESP32 |
-| `PIN_I2C_SDA` | GPIO 21 | Общая шина BME280 + AHT10/20 + DS3231 |
-| `PIN_I2C_SCL` | GPIO 22 | Общая шина BME280 + AHT10/20 + DS3231 |
-| `PIN_BUTTON` | GPIO 27 | Второй вывод на GND, `INPUT_PULLUP` |
+| Определение | ESP32 | ESP8266 | Подключение |
+|---|---|---|---|
+| `PIN_PWM_LED` | GPIO 5 | GPIO 14 (D5) | Вход MOSFET/драйвера, общий GND с платой |
+| `PIN_I2C_SDA` | GPIO 21 | GPIO 4 (D2) | Общая шина BME280 + AHT10/20 + DS3231 |
+| `PIN_I2C_SCL` | GPIO 22 | GPIO 5 (D1) | Общая шина BME280 + AHT10/20 + DS3231 |
+| `PIN_BUTTON` | GPIO 27 | GPIO 13 (D7) | Второй вывод на GND, `INPUT_PULLUP` |
 
-Адреса на общей шине I2C: `BME280_ADDR = 0x76` (альтернатива `0x77`), `RTC_ADDR = 0x68` (константа носит справочный характер: `rtc.begin()` из GyverDS3231 обращается к адресу по умолчанию), адрес AHT10/AHT20 `0x38`/`0x39` задан константой `AHT_ADDR` в [`sensors.cpp`](LightScheduler/sensors.cpp).
+Пины объявлены в `board.h` по платформам; имена (`PIN_*`) для обеих одинаковы. Для ESP8266 выбраны выводы вне strapping-группы (GPIO 0/2/12/15/16) и вне UART (GPIO 1/3); GPIO 16 не поддерживает ШИМ, поэтому PWM — на GPIO 14 (D5).
+
+Адреса на общей шине I2C: `BME280_ADDR = 0x77` (альтернатива `0x76`), `RTC_ADDR = 0x68` (константа носит справочный характер: `rtc.begin()` из GyverDS3231 обращается к адресу по умолчанию), адрес AHT10/AHT20 `0x38`/`0x39` задан константой `AHT_ADDR` в [`sensors.cpp`](LightScheduler/sensors.cpp).
 
 ### Прочие константы
 
 | Константа | Значение | Смысл |
 |---|---|---|
-| `PWM_FREQ` | 25000 Гц | Частота LEDC |
+| `PWM_FREQ` | 25000 Гц | Частота ШИМ (LEDC на ESP32, `analogWrite` на ESP8266) |
 | `PWM_RES` | 8 бит | Диапазон скважности 0…255 |
-| `PWM_CHANNEL` | 0 | Канал LEDC |
+| `PWM_CHANNEL` | 0 | Канал LEDC (только ESP32; на ESP8266 не используется) |
 | `FADE_STEP_MS` | 500 мс | Период шага розжига |
 | `TIME_ZONE` | 3 | Часовой пояс для DS3231 (`setStampZone`) |
 | `WIFI_SSID` / `WIFI_PASS` | `""` / `""` | Учётные данные сети; пустой SSID → точка доступа |
@@ -97,7 +100,7 @@ esp-sunrise-alarm/
         ▼            ▼           ▼           ▼            ▼
    ┌─────────┐ ┌──────────┐ ┌────────┐ ┌─────────┐ ┌──────────┐
    │ config  │ │ sensors  │ │ light  │ │ button  │ │  webui   │
-   │+ Saver  │ │BME/AHT   │ │ LEDC   │ │EncButton│ │ Settings │
+   │+ Saver  │ │BME/AHT   │ │ ШИМ    │ │EncButton│ │ Settings │
    └────┬────┘ └──────────┘ └────────┘ └─────────┘ └──────────┘
         │                     ▲            │             │
         │ изменяет config     └────────────┴─────────────┘
@@ -126,7 +129,7 @@ struct Config {
 extern Config config;  // sizeof(Config) = 32 байта
 ```
 
-Функции: `config_setup()` (`LittleFS.begin(true)` + `saver.begin()`), `config_tick()` (`saver.tick()`), `config_save()` (`saver.write()`).
+Функции: `config_setup()` (монтирование LittleFS + `saver.begin()`), `config_tick()` (`saver.tick()`), `config_save()` (`saver.write()`). На ESP32 вызывается `LittleFS.begin(true)` (формат при первом запуске), на ESP8266 — `LittleFS.begin()`: у ESP8266-ядра 3.x нет аргумента `formatOnFail`, автоформат при сбое монтирования включён в настройках LittleFS по умолчанию.
 
 Сохранение: `SaverFile saver(LittleFS, "/config.cfg", config, 'C', 10, FileStore::Atomic)` — версия формата `'C'`, автосохранение (проверка CRC с периодом `timeout/2`, т.е. примерно через 5–10 с после последнего изменения), атомарная замена файла (защита от сбоя питания). При фактической записи в `config_tick()`/`config_save()` в лог пишется время «Настройки сохранены: <дата> <время>».
 
@@ -155,12 +158,14 @@ extern Config config;  // sizeof(Config) = 32 байта
 
 | Функция | Поведение |
 |---|---|
-| `light_setup()` | `ledcAttachChannel(PIN_PWM_LED, PWM_FREQ, PWM_RES, PWM_CHANNEL)` (LEDC API ESP32 core 3.x) + гашение |
-| `light_startFadeIn()` | Запуск розжига: `on = true` (свет включён сразу), `fadeStart = millis()`, `lastStep = fadeStart`, `ledcWriteChannel(PWM_CHANNEL, 0)` |
-| `light_stop()` | Мгновенное гашение и остановка fade (`on = false`) |
-| `light_update()` | Неблокирующий шаг не чаще `FADE_STEP_MS`: `elapsed = now - fadeStart`, `idx = elapsed*255/(fadeDuration*60*1000)`, скважность = `CURVE_LUT[idx]`; целочисленно, без float. По завершении розжига `fading = false`, `on` остаётся `true`; затем отсчитывается `turnOffDelay` минут и вызывается `light_stop()` (автовыключение) |
+| `light_setup()` | `pwm_setup()`: на ESP32 — `ledcAttachChannel(PIN_PWM_LED, PWM_FREQ, PWM_RES, PWM_CHANNEL)`, на ESP8266 — `analogWriteFreq(PWM_FREQ)` + `analogWriteRange(255)`; затем гашение |
+| `light_startFadeIn()` | Запуск розжига: `on = true` (свет включён сразу), `fadeStart = millis()`, `lastStep = fadeStart`, `pwm_write(0)` |
+| `light_stop()` | Мгновенное гашение и остановка fade (`on = false`), `pwm_write(0)` |
+| `light_update()` | Неблокирующий шаг не чаще `FADE_STEP_MS`: `elapsed = now - fadeStart`, `idx = elapsed*255/(fadeDuration*60*1000)`, скважность = `pwm_write(CURVE_LUT[idx])`; целочисленно, без float. По завершении розжига `fading = false`, `on` остаётся `true`; затем отсчитывается `turnOffDelay` минут и вызывается `light_stop()` (автовыключение) |
 | `light_active()` | `true`, пока идёт розжиг (после завершения — `false`) |
 | `light_isOn()` | `true`, если свет включён: с `light_startFadeIn()` до `light_stop()`, включая завершённый розжиг |
+
+**Платформенный ШИМ.** Все вызовы ШИМ скрыты в `light.cpp` за статическими хелперами `pwm_setup()`/`pwm_write(uint8_t duty)`; остальной код платформы не знает. ESP32 использует LEDC API ядра 3.x (`ledcAttachChannel`/`ledcWriteChannel`, канал `PWM_CHANNEL = 0`); у ESP8266 LEDC нет — там `analogWrite` (`analogWriteFreq`, `analogWriteRange(255)`, скважность 0…255). Диапазон скважности и логика розжига/кривой на обеих платформах одинаковы.
 
 **Кривая розжига — перцептуальная.** Раньше скважность росла линейно (`0→255`), из-за чего свет «рывком» появлялся в начале. Теперь используется `d(p) = p^γ`, где `γ = ln(0.30)/ln(0.50) ≈ 1.7369656`: **50 % прогресса розжига дают ≈30 % скважности** (`LUT[128] = 77` из 255, т.е. ≈30.2 %). Кривая реализована как `static const uint8_t CURVE_LUT[256]` (256 байт во flash; на ESP32 `const` и так лежит во flash), индекс — прогресс 0…255. Рантайм только целочисленный; накопления с плавающей точкой нет, поэтому нет дрейфа. Первый ненулевой уровень — `LUT[8]` (≈3.1 % длительности, при округлении half-up). 8-битный ШИМ сохранён. Обоснование, сравнение моделей восприятия (Стивенс, sRGB, CIE L\*), таблица и offline-генератор — в [`docs/light-curve.md`](docs/light-curve.md).
 
@@ -176,6 +181,8 @@ extern Config config;  // sizeof(Config) = 32 байта
 |---|---|
 | `webui_setup()` | `wifiConnect()`, затем `sett.begin()` + регистрация `onBuild(build)` и `onUpdate(update)` |
 | `webui_tick()` | `sett.tick()` |
+
+Заголовок Wi-Fi подключается по платформе: `<WiFi.h>` на ESP32, `<ESP8266WiFi.h>` на ESP8266 (внутри Settings 1.4.3 — так же).
 
 Wi-Fi: при заданном `WIFI_SSID` — режим STA с ожиданием до 15 с (блокирующий `delay(500)` **внутри `setup()`**, не в `loop()`); иначе или при неудаче — режим AP с именем `AP_NAME` (IP по умолчанию `192.168.4.1`). IP выводится в Serial.
 
@@ -248,7 +255,7 @@ Wi-Fi: при заданном `WIFI_SSID` — режим STA с ожидани�
 | **GyverBME280** | `<GyverBME280.h>`, `GyverBME280` | Драйвер BME280 (температура, давление; IIR-фильтр) |
 | **Adafruit AHTX0** | `<Adafruit_AHTX0.h>`, `Adafruit_AHTX0` | Драйвер AHT10/AHT20 (влажность), инициализация и калибровка на общей шине I2C |
 | **GyverDS3231** | `<GyverDS3231.h>`, `GyverDS3231` | Драйвер DS3231, `setStampZone`, `setBuildTime`, `weekDay()` |
-| ESP32 core | `<Wire.h>`, `<WiFi.h>`, `<LittleFS.h>`, `ledc*` | I2C, Wi-Fi, ФС, ШИМ |
+| Ядро платформы | ESP32: `<Wire.h>`, `<WiFi.h>`, `<LittleFS.h>`, `ledc*`; ESP8266: `<Wire.h>`, `<ESP8266WiFi.h>`, `<LittleFS.h>`, `analogWrite*` | I2C, Wi-Fi, ФС, ШИМ |
 
 Транзитивные зависимости (ставятся автоматически менеджером библиотек): GTL, GyverDB, StringUtils, GyverHTTP, BSON, Stamp, Table, StreamIO (для Settings), GyverIO (для EncButton), Stamp (для GyverDS3231), Adafruit BusIO и Adafruit Unified Sensor (для Adafruit AHTX0).
 
@@ -258,17 +265,22 @@ Wi-Fi: при заданном `WIFI_SSID` — режим STA с ожидани�
 
 ## Сборка и прошивка
 
-1. Установить **esp32 by Espressif Systems** (Boards Manager) и выбрать плату **ESP32 Dev Module**.
+1. Установить плату: **esp32 by Espressif Systems** → **ESP32 Dev Module** или **esp8266 by ESP8266 Community** → **NodeMCU 1.0 / Wemos D1 mini** (поддерживаются обе; платформа определяется выбранным ядром при сборке).
 2. Установить библиотеки из таблицы выше (`Sketch → Include Library → Manage Libraries`).
-3. `Tools → Partition Scheme` — схема с LittleFS, например **Default 4MB with spiffs** (нужно место под `/config.cfg`).
+3. `Tools → Partition Scheme` — схема с LittleFS, например **Default 4MB with spiffs** (нужно место под `/config.cfg`); относится к ESP32, на ESP8266 LittleFS работает в стандартной разметке 4 МБ.
 4. Открыть [`LightScheduler.ino`](LightScheduler/LightScheduler.ino); все `.h/.cpp` уже лежат в той же папке.
 5. Прошить, открыть Serial Monitor на 115200 — в логе будут версия, статусы датчиков, RTC и IP-адрес веб-интерфейса.
 
-**Проверка сборки (реальный тулчейн):** `arduino-cli 1.5.1`, ядро `esp32:esp32 3.3.0`, библиотеки из таблицы выше (включая Adafruit AHTX0/BusIO/Unified Sensor). Команда `arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/` завершается успешно (проверено после добавления AHT-влажности и фильтра): flash 1 097 051 из 1 310 720 байт (83 %), RAM 49 028 из 327 680 байт (14 %), предупреждений из кода проекта нет.
+**Проверка сборки (реальный тулчейн):** `arduino-cli 1.5.1`, библиотеки из таблицы выше (включая Adafruit AHTX0/BusIO/Unified Sensor), обе платформы собираются успешно:
+
+- **ESP32** (`esp32:esp32 3.3.0`): `arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/` — flash 1 116 263 из 1 310 720 байт (85 %), RAM 49 384 из 327 680 байт (15 %), предупреждений из кода проекта нет.
+- **ESP8266** (`esp8266:esp8266 3.1.2`): `arduino-cli compile --fqbn esp8266:esp8266:nodemcuv2 LightScheduler/` — flash (IROM) 385 060 из 1 048 576 байт (36 %), RAM 31 656 из 80 192 байт (39 %), IRAM 62 739 из 65 536 байт (95 %), предупреждений из кода проекта нет. **IRAM на ESP8266 — узкое место** (≈2.8 КБ запаса): будущие IRAM-добавления обязательно проверять сборкой.
 
 > **Требование к ядру ESP32:** прошивка использует LEDC API ядра 3.x — `ledcAttachChannel()` / `ledcWriteChannel()`. В core 3.0 legacy-вызовы `ledcSetup`/`ledcAttachPin`/`ledcWrite(channel, …)` удалены, поэтому нужно ядро **esp32 by Espressif Systems ≥ 3.0** (проверено на 3.3.0).
+>
+> **Требование к ядру ESP8266:** прошивка использует `analogWriteFreq`/`analogWriteRange`/`analogWrite` и `LittleFS` — доступны в ядре **esp8266 by ESP8266 Community 3.x** (проверено на 3.1.2). LEDC на ESP8266 нет; различия скрыты в `light.cpp` (`pwm_setup()`/`pwm_write()`), а пины зависят от платформы и объявлены в `board.h`.
 
-Настройка под свою схему — константы и значения по умолчанию в [`config.h`](LightScheduler/config.h), Wi-Fi — `WIFI_SSID`/`WIFI_PASS`/`AP_NAME` там же.
+Настройка под свою схему — константы и значения по умолчанию в [`config.h`](LightScheduler/config.h), **пины — в [`board.h`](LightScheduler/board.h)** (по платформам), Wi-Fi — `WIFI_SSID`/`WIFI_PASS`/`AP_NAME` в `config.h`.
 
 > После первого запуска прошивки с форматом `'C'` старые настройки из `/config.cfg` сбрасываются на значения по умолчанию (все дни 07:30, расписание включено).
 

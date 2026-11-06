@@ -209,9 +209,13 @@ for row in range(16):
 > API-вызовы ниже — для ESP32 core 3.x (`ledcWriteChannel`). Миграция с legacy LEDC
 > (`ledcSetup`/`ledcAttachPin`/`ledcWrite(channel,…)`) описана в
 > [`technical-notes.md`](technical-notes.md) §1.14.
+>
+> С 2026-11-06 (порт ESP8266) прямые вызовы скрыты за платформенными `pwm_setup()`/`pwm_write()`:
+> `ledcWriteChannel` на ESP32, `analogWrite` на ESP8266. На семантику кривой, значения
+> `CURVE_LUT` и эту реализацию это не влияет — см. [`technical-notes.md`](technical-notes.md) §1.17.
 
 1. Вставить `CURVE_LUT[256]` из раздела 7 в `light.cpp` (файл-уровень, `static const` —
-   на ESP32 такое `const` и так лежит во flash, `PROGMEM` не обязателен). Добавить
+   на ESP32 и ESP8266 такое `const` и так лежит во flash, `PROGMEM` не обязателен). Добавить
    `static_assert(sizeof(CURVE_LUT) == 256, "CURVE_LUT: ожидается 256 байт");`.
 2. Публичный API **не менять**: `light_setup / light_startFadeIn / light_stop / light_update /
    light_active`.

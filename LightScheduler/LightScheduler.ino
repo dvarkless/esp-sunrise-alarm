@@ -1,5 +1,5 @@
 // ============================================================================
-// Smart Scheduled Light Controller (ESP32)
+// Smart Scheduled Light Controller (ESP32/ESP8266)
 // Главный файл: setup() и неблокирующий loop().
 // Расписание — по дням недели (config.days[7], 0=Пн ... 6=Вс) + общий выключатель.
 // Кнопка: клик — отложить текущий розжиг (только если свет включён), удержание >= 2 с — пропустить сегодня.
@@ -33,7 +33,7 @@ void setup() {
 
     config_setup();   // LittleFS + загрузка/сохранение конфига
     sensors_setup();  // I2C, BME280, DS3231
-    light_setup();    // LEDC PWM
+    light_setup();    // pwm_setup(): LEDC на ESP32, analogWrite на ESP8266
     button_setup();   // EncButton
     webui_setup();    // WiFi + веб-интерфейс
 

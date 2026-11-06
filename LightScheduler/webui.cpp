@@ -4,7 +4,12 @@
 #include "sensors.h"
 #include "log.h"
 
+// Заголовок WiFi зависит от платформы; board.h (через config.h) уже определил LS_BOARD_*.
+#ifdef LS_BOARD_ESP8266
+#include <ESP8266WiFi.h>
+#else
 #include <WiFi.h>
+#endif
 #include <SettingsGyver.h>
 
 SettingsGyver sett("Light Scheduler");

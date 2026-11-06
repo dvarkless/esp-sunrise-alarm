@@ -33,8 +33,12 @@ static bool     on        = false;  // свет включён: true от light_
 static uint32_t fadeStart = 0;      // millis() начала розжига
 static uint32_t lastStep  = 0;      // millis() последнего шага ШИМ
 
+// Платформенный слой ШИМ: реализация и объяснение веток — в конце файла
+static void pwm_setup();
+static void pwm_write(uint8_t duty);
+
 void light_setup() {
-    ledcAttachChannel(PIN_PWM_LED, PWM_FREQ, PWM_RES, PWM_CHANNEL);
+    pwm_setup();
     light_stop();
 }
 
@@ -43,13 +47,13 @@ void light_startFadeIn() {
     fading = true;
     fadeStart = millis();
     lastStep = fadeStart;
-    ledcWriteChannel(PWM_CHANNEL, 0);
+    pwm_write(0);
 }
 
 void light_stop() {
     on = false;
     fading = false;
-    ledcWriteChannel(PWM_CHANNEL, 0);
+    pwm_write(0);
 }
 
 bool light_active() {
@@ -71,13 +75,13 @@ void light_update() {
     // в uint32), idx <= 254; 255 выставляется отдельной веткой выше. Накопления нет — дрейфа нет.
     if (fading) {
         if (!dur || elapsed >= dur) {
-            ledcWriteChannel(PWM_CHANNEL, 255);
+            pwm_write(255);
             fading = false;
             fadeStart = millis();
             return;
         }
         uint16_t idx = (uint16_t)(elapsed * 255UL / dur);
-        ledcWriteChannel(PWM_CHANNEL, CURVE_LUT[idx]);  // при PWM_RES = 8 допустим диапазон 0..255
+        pwm_write(CURVE_LUT[idx]);  // при PWM_RES = 8 допустим диапазон 0..255
     }
     else {
         if (!dur || elapsed >= dur) {
@@ -85,4 +89,26 @@ void light_update() {
             return;
         }
     }
+}
+
+// ===================== Платформенный слой ШИМ =====================
+// ESP32 (ядро 3.x): аппаратный LEDC — ledcAttachChannel() + ledcWriteChannel().
+// ESP8266 (ядро 3.1.2): ledc* отсутствует — analogWrite с явно заданными частотой
+// и диапазоном 0..255 (PWM_RES = 8), канал не нужен.
+static void pwm_setup() {
+#if defined(LS_BOARD_ESP32)
+    ledcAttachChannel(PIN_PWM_LED, PWM_FREQ, PWM_RES, PWM_CHANNEL);
+#else
+    analogWriteFreq(PWM_FREQ);       // 25 кГц в допустимом диапазоне 100..60000 Гц
+    analogWriteRange(255);           // 8 бит, как PWM_RES
+    analogWrite(PIN_PWM_LED, 0);     // старт с погашенного света
+#endif
+}
+
+static void pwm_write(uint8_t duty) {
+#if defined(LS_BOARD_ESP32)
+    ledcWriteChannel(PWM_CHANNEL, duty);
+#else
+    analogWrite(PIN_PWM_LED, duty);  // скважность 0..255
+#endif
 }

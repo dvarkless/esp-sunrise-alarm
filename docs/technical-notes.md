@@ -2,7 +2,8 @@
 
 Distilled **firmware engineering** notes from the implementation of the three features (per-weekday
 schedule, perceptual fade curve, button snooze/skip) plus the post-release gated-tap policy change
-(§1.12) and the first real-toolchain compile (§1.14). Release history: `e97cec3` (features) →
+(§1.12), the first real-toolchain compile (§1.14) and the dual-platform ESP32/ESP8266 port
+(§1.17). Release history: `e97cec3` (features) →
 `2cf0285` (gated tap + technical notes) → `84c65d0` (`.gitignore`: local `libs/`) → compile-fix +
 docs-sync release (2026-11-04, ESP32 core 3.x LEDC API; see `git log`).
 
@@ -200,10 +201,10 @@ static_assert(sizeof(CURVE_LUT) == 256, "CURVE_LUT: ожидается 256 ба�
 uint32_t elapsed = now - fadeStart;
 uint32_t dur     = fading ? config.fadeDuration * 60 * 1000 : config.turnOffDelay * 60 * 1000;
 
-if (!dur || elapsed >= dur) { ledcWriteChannel(PWM_CHANNEL, 255); fading = false; return; }
+if (!dur || elapsed >= dur) { pwm_write(255); fading = false; return; }
 
 uint16_t idx = (uint16_t)(elapsed * 255UL / dur);   // elapsed ≤ 3.6e6 => product < 918e6
-ledcWriteChannel(PWM_CHANNEL, CURVE_LUT[idx]);
+pwm_write(CURVE_LUT[idx]);
 ```
 
 Hacks / details worth remembering:
@@ -212,7 +213,8 @@ Hacks / details worth remembering:
 - `elapsed*255` fits `uint32` because the UI slider caps `fadeDuration` at 60 minutes (3.6e6 ms →
   product < 918e6). `idx ≤ 254` in
   the curve branch; exact `255` is handled by the dedicated end branch.
-- On ESP32, `static const` arrays live in flash — no `PROGMEM`/`pgm_read_byte` needed (0 extra RAM).
+- On both ESP32 and ESP8266, `static const` arrays are placed in flash — no `PROGMEM`/`pgm_read_byte`
+  needed (0 extra RAM).
 - `static_assert` makes a table-size regression a compile-time error.
 - Quantization reality check: with half-up rounding the first nonzero duty is `LUT[8]` (≈3.1 % of the
   fade); the unavoidable `0→1` step is the visible low-end limit of 8-bit PWM. Future option: 10-bit
@@ -278,9 +280,9 @@ the light module keeps a separate `on` flag:
 static bool fading = false;   // light_active()
 static bool on     = false;   // light_isOn()
 
-void light_startFadeIn() { on = true;  fading = true; ... ledcWriteChannel(PWM_CHANNEL, 0); }
-void light_stop()        { on = false; fading = false; ledcWriteChannel(PWM_CHANNEL, 0); }
-// end of fade: ledcWriteChannel(PWM_CHANNEL, 255); fading = false;   // on stays true
+void light_startFadeIn() { on = true;  fading = true; ... pwm_write(0); }
+void light_stop()        { on = false; fading = false; pwm_write(0); }
+// end of fade: pwm_write(255); fading = false;   // on stays true
 ```
 
 - `on` is set **before** the first PWM write in `light_startFadeIn()`, so the first tap after a
@@ -340,7 +342,8 @@ ledcWriteChannel(PWM_CHANNEL, duty);
 ```
 
 - `ledcAttachChannel(pin, freq, res, channel)` заменяет пару `ledcSetup` + `ledcAttachPin`; параметры
-  проекта прежние — канал 0, 25 кГц, 8 бит, GPIO 5 (`PWM_CHANNEL`/`PWM_FREQ`/`PWM_RES`/`PIN_PWM_LED`).
+  проекта прежние — канал 0, 25 кГц, 8 бит, GPIO 5 на ESP32 (`PWM_CHANNEL`/`PWM_FREQ`/`PWM_RES`/
+  `PIN_PWM_LED`); на ESP8266 ШИМ через `analogWrite` на GPIO 14, `PWM_CHANNEL` там не используется (§1.17).
 - `ledcWriteChannel(channel, duty)` — запись по номеру канала. В core 3.x появилась и перегрузка
   `ledcWrite(pin, duty)` (по пину); её не используем, чтобы сохранить явный `PWM_CHANNEL`.
 - Диапазон `duty` прежний: `2^8 − 1 = 255`; поведение fade не изменилось — изменены только
@@ -401,6 +404,92 @@ ok = bme.begin(BME280_ADDR);
   standby time: `(_standby_time << 5) | (_filter_coef << 2)`.
 - If the GyverBME280 version changes, re-check the `FILTER_*` values against `GyverBME280.h`.
 
+### 1.17 Двойная платформа: ESP32 + ESP8266 (`board.h`)
+
+Chip-family port (2026-11-06): the same sketch must build and run on both Arduino cores
+(`esp32:esp32 3.3.0` and `esp8266:esp8266 3.1.2`) without touching the feature modules.
+
+**Dispatch and pins.** The new `LightScheduler/board.h` is included by `config.h` and normalizes the
+platform before anything else sees it:
+
+```cpp
+#if defined(ESP8266) || defined(ARDUINO_ARCH_ESP8266)
+#define LS_BOARD_ESP8266
+#elif defined(ESP32) || defined(ARDUINO_ARCH_ESP32)
+#define LS_BOARD_ESP32
+#else
+#error "Поддерживаются только ESP32 и ESP8266"
+#endif
+```
+
+The Arduino build system passes `-DARDUINO_ARCH_{build.arch}` (uppercased) in every compile recipe,
+so the `ARDUINO_ARCH_*` macros are guaranteed; the cores also define `ESP8266` / `ESP32` (belt and
+braces; ESP8266 is checked first, as in GyverLibs). Pins live in this header per board:
+
+| Pin | ESP32 | ESP8266 |
+|---|---|---|
+| `PIN_PWM_LED` | GPIO 5 | GPIO 14 (D5) |
+| `PIN_I2C_SDA` | GPIO 21 | GPIO 4 (D2) |
+| `PIN_I2C_SCL` | GPIO 22 | GPIO 5 (D1) |
+| `PIN_BUTTON` | GPIO 27 | GPIO 13 (D7) |
+
+ESP8266 pin rationale: avoid the strapping pins (GPIO 0/2/12/15/16 — boot-mode side effects), the
+UART pins (GPIO 1/3) and the flash pins (6–11); GPIO 16 has no PWM. D5/D2/D1/D7 are the usual
+NodeMCU/Wemos choices; the button uses `INPUT_PULLUP` to GND. `PWM_CHANNEL` (LEDC channel 0) stays
+ESP32-only.
+
+**PWM abstraction.** ESP32 uses LEDC core 3.x; ESP8266 core 3.1.2 has **no** `ledc*` — its PWM is
+`analogWrite` (`analogWriteFreq` clamps 100..60000 Hz, `analogWriteRange()` defaults to 255 in core
+3.x, `analogWriteResolution(8)` is the equivalent). `light.cpp` keeps two static helpers, so the fade
+code stays platform-agnostic:
+
+```cpp
+static void pwm_setup() {
+#if defined(LS_BOARD_ESP32)
+    ledcAttachChannel(PIN_PWM_LED, PWM_FREQ, PWM_RES, PWM_CHANNEL);
+#else
+    analogWriteFreq(PWM_FREQ);       // 25 кГц в допустимом диапазоне 100..60000 Гц
+    analogWriteRange(255);           // 8 бит, как PWM_RES
+    analogWrite(PIN_PWM_LED, 0);
+#endif
+}
+static void pwm_write(uint8_t duty) {
+#if defined(LS_BOARD_ESP32)
+    ledcWriteChannel(PWM_CHANNEL, duty);
+#else
+    analogWrite(PIN_PWM_LED, duty);  // скважность 0..255
+#endif
+}
+```
+
+Both platforms therefore see duty 0–255 and the identical perceptual `CURVE_LUT`. At 25 kHz the PWM
+period is `80 MHz / 25 kHz = 3200` cycles, so 8-bit resolution fits; the ESP8266 shared-waveform
+implementation still makes the lowest steps coarser in absolute time than ESP32's LEDC, but the duty
+values written are byte-identical.
+
+**LittleFS mount.** `config.cpp` needs one more platform branch: ESP32's `LittleFS.begin(bool
+formatOnFail)` takes the format flag, while ESP8266 core 3.1.2's `FS::begin()` has no such argument
+(`bool begin()` only) — `LittleFS.begin(true)` would not compile. The ESP8266 branch therefore calls
+`LittleFS.begin()`; the core's `LittleFSConfig` default keeps `autoFormat = true` (format on mount
+failure), so the "format on first boot" behavior is preserved on both boards.
+
+**Wi-Fi header.** `webui.cpp` includes `<WiFi.h>` on ESP32 and `<ESP8266WiFi.h>` on ESP8266
+(`LS_BOARD_*`); Settings 1.4.3 does the same internally (`SettingsBase.h`), so its web server works on
+both cores. `WiFi.mode/begin/status/localIP/softAP/softAPIP` are API-compatible; on ESP8266
+`IPAddress` also derives from `Printable`, so `log_println(WiFi.localIP())` is unchanged.
+
+**Other cross-platform facts (verified in the installed cores):** `configTime(int, int, const char*)`
+and `getLocalTime(tm*, uint32_t)` exist on both; `LittleFS.h` exists in ESP8266 core 3.x;
+`Wire.begin(sda, scl)` supports the ESP8266 remap; all 14 Gyver libraries declare `esp8266,esp32`
+(or `*`). The build gate is both commands in §5.
+
+**Verified builds (2026-11-06):** both targets PASS, 0 project warnings — ESP32 flash 85 %, RAM 15 %;
+ESP8266 flash (IROM) 36 %, RAM 39 %, **IRAM 95 % (≈2.8 KB slack)**. So the ESP8266 bound is IRAM, not
+flash/RAM: any future `IRAM_ATTR`/interrupt-heavy code must be checked with the build.
+
+**Risks / not verified:** no hardware run on ESP8266 yet (PWM at 25 kHz and its low-end linearity,
+LittleFS mount, AP mode, DS3231/AHT on the remapped I2C pins); check runtime stability on the device.
+
 ---
 
 ## 2. Verification without hardware or a toolchain
@@ -432,7 +521,8 @@ stubs for `Arduino.h`, `Wire.h`, `WiFi.h`, `LittleFS.h`, `SaverFile.h`, `GyverBM
 - Catches missing includes, wrong signatures against the *expected* API, typos, `static_assert`
   failures, format-argument mistakes.
 - The stub only has to declare what the code touches: `millis()`, `delay()`,
-  `ledcAttachChannel`/`ledcWriteChannel` (core 3.x API; before §1.14 it was `ledcSetup/AttachPin/Write`),
+  `ledcAttachChannel`/`ledcWriteChannel` (core 3.x API; before §1.14 it was `ledcSetup/AttachPin/Write`)
+  or `analogWrite*` for the ESP8266 branch (§1.17),
   a `Serial` with `println/print/printf`, Wi-Fi calls, `SaverFile` as a template ctor,
   `Builder` widget methods (including both `uint8_t*` and `uint32_t*` Slider overloads), etc.
 - Requires compiling the `.ino` with `-x c++`.
@@ -449,8 +539,8 @@ Compiling a tiny program that includes the *real* `config.h` (with the `Arduino.
 ABI-sensitive assumptions:
 
 ```
-sizeof(DaySchedule)=3  sizeof(Config)=28
-defaults: enabled=1 snooze=10 fade=30000; all 7 days 07:30/enabled -> PASS
+sizeof(DaySchedule)=3  sizeof(Config)=32
+defaults: enabled=1 snooze=10 fade=15 min turnOff=60 min; all 7 days 07:30/enabled -> PASS
 ```
 
 This matters because `SaverFile` reads/writes the struct raw — an accidental reorder or added field
@@ -498,8 +588,9 @@ Fast regression check if another widget is added later.
 - History: `ed8c201` (user's baseline import) → `e97cec3` (three features + curve) → `2cf0285`
   (gated tap + technical notes) → `84c65d0` (`.gitignore`: `libs/`) → compile-fix + docs-sync
   release (2026-11-04: ESP32 core 3.x LEDC API, docs split) → AHT humidity + BME280 filtration
-  release (2026-11-04; see `git log`). All pushes were fast-forward; HEAD == origin/main after each
-  release.
+  release (2026-11-04; see `git log`) → dual-platform ESP32/ESP8266 port (2026-11-06, current
+  working-tree change, not committed; builds verified for both targets, §1.17). All past pushes were
+  fast-forward; HEAD == origin/main after each release.
 - Release mechanics (explicit-path staging, secret scan, push verification, GPG-signing sandbox
   workaround, unsigned-commit disclosure) and all agent-orchestration patterns now live in
   [`lead-hacks.md`](lead-hacks.md).
@@ -529,6 +620,13 @@ Fast regression check if another widget is added later.
 - ESP32 core 3.x removed the legacy LEDC API (`ledcSetup`/`ledcAttachPin`/`ledcWrite(channel,…)`):
   use `ledcAttachChannel()`/`ledcWriteChannel()` (§1.14). Stub-based checks can hide this because the
   stub is whatever you wrote — only a real compile proves it.
+- ESP8266 has no LEDC: PWM is `analogWrite` + `analogWriteFreq`/`analogWriteRange(255)`, so the ESP32
+  LEDC calls must stay behind the `light.cpp` helpers (§1.17).
+- Platform differences belong only in `board.h` (dispatch + pins), the `light.cpp` PWM helpers, the
+  `webui.cpp` WiFi include and the `config.cpp` LittleFS mount; never branch on ESP32/ESP8266 inside
+  feature modules.
+- ESP8266 I/O: avoid strapping/UART/flash pins (0/2/12/15/16, 1/3, 6–11); GPIO 16 has no PWM; the
+  `IPAddress` there is `Printable` too, so logging code is shared.
 - AHT10/AHT20: `Adafruit_AHTX0::getEvent()` busy-waits ≈80 ms (`while(busy) delay(10)`), so it must
   not be called from `loop()` — use the raw-Wire trigger→poll→read machine (§1.15).
 - BME280 IIR: `setFilter()` must come **before** `begin()` — the coefficient is written to register
@@ -551,6 +649,11 @@ Fast regression check if another widget is added later.
 
 **Curve:** `d(p)=p^1.7369656`; `LUT[128]=77` → ≈30.2 % duty at 50 % progress; `LUT[0]=0`,
 `LUT[255]=255`; first nonzero `LUT[8]`.
+
+**Platform:** `board.h` selects `LS_BOARD_ESP32` / `LS_BOARD_ESP8266` (ESP8266 checked first) and
+pins: ESP32 GPIO 5/21/22/27, ESP8266 GPIO 14/4/5/13 (`PIN_PWM_LED`/`I2C SDA`/`I2C SCL`/button). PWM:
+LEDC core 3.x on ESP32, `analogWrite` (25 kHz, range 255) on ESP8266 — both behind
+`pwm_setup()`/`pwm_write()` in `light.cpp` (§1.17).
 
 **Light state:** `light_active()` = fade running (false once the lamp reaches 255);
 `light_isOn()` = on flag, true from `light_startFadeIn()` (including after the fade completes) until
@@ -593,10 +696,14 @@ GyverBME280 1.5.4, GyverDS3231 1.2.1 plus 9 transitive deps; exact versions/SHAs
 `libs/README.md` (§1.13). AHT uses the installed Arduino libraries Adafruit AHTX0 2.0.6 +
 Adafruit BusIO + Adafruit Unified Sensor 1.1.15 (not part of `libs/`).
 
-**Build (real toolchain, 2026-11-04):** `arduino-cli 1.5.1` + core `esp32:esp32 3.3.0`:
-`arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/` → exit 0. Latest build (after NTP +
-logs + auto-off): flash 1 116 187 / 1 310 720 B (85 %), RAM 49 384 / 327 680 B (15 %),
-no project warnings. Requires ESP32 core ≥ 3.0 and the Adafruit AHTX0/BusIO/Unified Sensor libraries;
+**Build (real toolchain, `arduino-cli 1.5.1`):** two targets, both verified in §1.17:
+- ESP32 (`esp32:esp32 3.3.0`): `arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/` → exit 0;
+  flash 1 116 263 / 1 310 720 B (85 %), RAM 49 384 / 327 680 B (15 %), 0 project warnings.
+- ESP8266 (`esp8266:esp8266 3.1.2`): `arduino-cli compile --fqbn esp8266:esp8266:nodemcuv2 LightScheduler/`
+  → exit 0; flash (IROM) 385 060 / 1 048 576 B (36 %), RAM 31 656 / 80 192 B (39 %),
+  **IRAM 62 739 / 65 536 B (95 % — only ≈2.8 KB slack**, the tight constraint for future ESP8266 work),
+  0 project warnings (only 2 `SyntaxWarning`s from the ESP8266 core's own `elf2bin.py`, not our code).
+Requires ESP32 core ≥ 3.0 / ESP8266 core 3.x and the Adafruit AHTX0/BusIO/Unified Sensor libraries;
 only the `compile-checker` agent runs `arduino-cli` (§1.14).
 
 **Hardware checklist (still pending — build verified, device not):** Saver `'C'` migration from an old `/config.cfg`;
@@ -604,7 +711,9 @@ DS3231 weekday/date mapping; 2 s hold boundary + debounce; tap-vs-hold feel; LED
 perceived smoothness; web UI day-group rendering + snooze persistence after reboot; power-cycle
 clears RAM snooze/skip (expected); **new:** AHT10/AHT20 present at `0x38` and humidity in the UI,
 AHT/BME cross-talk on the shared bus, BME280 IIR ×16 smoothing vs response time, AHT cadence
-responsiveness (2 s), fallback when the AHT is unplugged at runtime.
+responsiveness (2 s), fallback when the AHT is unplugged at runtime. **ESP8266 additions:** build
+from `esp8266:esp8266 3.1.2`, PWM on GPIO 14 (D5) and the lowest steps of the curve, LittleFS
+`/config.cfg` mount on ESP8266, AP mode on ESP8266, I2C remap on GPIO 4/5, button on GPIO 13.
 
 **Useful commands**
 
@@ -633,6 +742,7 @@ PY
 
 # build with the real toolchain (executed only by the compile-checker agent)
 arduino-cli compile --fqbn esp32:esp32:esp32 LightScheduler/
+arduino-cli compile --fqbn esp8266:esp8266:nodemcuv2 LightScheduler/
 
 # release state checks
 git status --short
