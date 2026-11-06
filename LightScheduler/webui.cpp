@@ -66,7 +66,7 @@ void build(sets::Builder& b) {
         sets::Group g(b, "Кнопка");
         // Клик по кнопке откладывает розжиг на это время; Saver сохранит значение сам
         b.Slider("Отложить (мин)", 1, 60, 1, "мин", &config.snoozeMinutes);
-        b.Slider("Время свечения (мин)", 0, 60, 1, "мин", &config.turnOffDelay);
+        b.Slider("Время свечения (мин)", 0, 120, 1, "мин", &config.turnOffDelay);
     }
 
     {
